@@ -114,15 +114,15 @@ test('el cuadre da lo mismo que la app antigua (2000 meses al azar) y el libre e
 
 test('cuadre: borrador al escribir, transferencias y gastos sueltos', () => {
   const b = baseLista();
-  const c = N.cuadre(b.e, '2026-03');
+  const c = N.cuadre(b.e, '2026-01');
   // I = 3500, E = 1050, F = 2450, libre 1225 c/u; Uno paga el gato (50) de su cuenta
   assert.deepEqual(c.t, { a: 72500, b: 27500 });
   assert.deepEqual(c.libre, { a: 122500, b: 122500 });
-  const d = N.cuadre(b.e, '2026-03', { 'n:b': 250000 });
+  const d = N.cuadre(b.e, '2026-01', { 'n:b': 250000 });
   assert.equal(d.libre.a, 172500);
-  b.aplicar([{ tipo: 'transferencia.registrar', transferencia: { id: 't1', mes: '2026-03', de: 'a', importe: 50000, fecha: '2026-03-02' } },
-    { tipo: 'gasto.guardar', gasto: { id: 'g1', fecha: '2026-03-10', desc: 'Cena', importe: 6000, cuenta: 'b', cat: 'restaurante' } }], { por: 'a' });
-  const e = N.cuadre(b.e, '2026-03');
+  b.aplicar([{ tipo: 'transferencia.registrar', transferencia: { id: 't1', mes: '2026-01', de: 'a', importe: 50000, fecha: '2026-01-02' } },
+    { tipo: 'gasto.guardar', gasto: { id: 'g1', fecha: '2026-01-10', desc: 'Cena', importe: 6000, cuenta: 'b', cat: 'restaurante' } }], { por: 'a' });
+  const e = N.cuadre(b.e, '2026-01');
   assert.equal(e.pendiente.a, e.t.a - 50000);
   assert.equal(e.totalSueltos, 6000);
   assert.equal(e.P.b, 6000);
@@ -358,4 +358,78 @@ test('tareas: la copia mensual se hace al arrancar aunque no sea la hora', () =>
   assert.equal(readdirSync(join(dir, 'mensual')).length, 1);
   assert.equal(base.meta('tarea_copia'), null);
   assert.ok(existsSync(dir));
+});
+
+test('arrastre: lo que no se transfiere pasa a los meses siguientes (y lo de más, también)', () => {
+  const b = baseLista(); // t = { a: 72500, b: 27500 } cada mes desde enero
+  let c = N.cuadre(b.e, '2026-01');
+  assert.deepEqual(c.arrastre, { a: 0, b: 0 });
+  assert.deepEqual(c.total, c.t);
+  // Enero: Uno transfiere 50000 de 72500; Dos transfiere 30000 (2500 de más)
+  b.aplicar([{ tipo: 'transferencia.registrar', transferencia: { id: 't1', mes: '2026-01', de: 'a', importe: 50000, fecha: '2026-01-05' } },
+    { tipo: 'transferencia.registrar', transferencia: { id: 't2', mes: '2026-01', de: 'b', importe: 30000, fecha: '2026-01-05' } }], { por: 'a' });
+  c = N.cuadre(b.e, '2026-02');
+  assert.deepEqual(c.arrastre, { a: 22500, b: -2500 });
+  assert.deepEqual(c.total, { a: 95000, b: 25000 });
+  assert.deepEqual(c.pendiente, { a: 95000, b: 25000 });
+  // Lo arrastrado reduce el libre de quien debe ese mes
+  assert.equal(c.libre.a, 122500 - 22500);
+  assert.equal(c.libre.b, 122500 + 2500);
+  // Febrero sin tocar: en marzo se acumula
+  assert.deepEqual(N.cuadre(b.e, '2026-03').arrastre, { a: 22500 + 72500, b: -2500 + 27500 });
+  // Se pone al día en marzo pagando todo lo pendiente
+  const p = N.cuadre(b.e, '2026-03').pendiente;
+  b.aplicar([{ tipo: 'transferencia.registrar', transferencia: { id: 't3', mes: '2026-03', de: 'a', importe: p.a, fecha: '2026-03-02' } },
+    { tipo: 'transferencia.registrar', transferencia: { id: 't4', mes: '2026-03', de: 'b', importe: p.b, fecha: '2026-03-02' } }], { por: 'a' });
+  assert.deepEqual(N.cuadre(b.e, '2026-03').pendiente, { a: 0, b: 0 });
+  assert.deepEqual(N.cuadre(b.e, '2026-04').arrastre, { a: 0, b: 0 });
+  // Un mes sin nóminas no genera deuda, pero sus transferencias cuentan
+  const v = new Base(':memory:');
+  v.aplicar([{ tipo: 'transferencia.registrar', transferencia: { id: 'x', mes: '2026-05', de: 'a', importe: 1000, fecha: '2026-05-01' } }], SIS);
+  assert.deepEqual(N.cuadre(v.e, '2026-06').arrastre, { a: -1000, b: 0 });
+});
+
+test('devoluciones de la conjunta (transferencia negativa)', () => {
+  const b = baseLista();
+  b.aplicar([{ tipo: 'gasto.guardar', gasto: { id: 'g', fecha: '2026-01-03', desc: 'Nevera', importe: 200000, cuenta: 'a', cat: 'casa' } }], { por: 'a' });
+  const c = N.cuadre(b.e, '2026-01');
+  assert.ok(c.t.a < 0); // Uno pagó tanto de su bolsillo que la conjunta le debe
+  const r = b.aplicar([{ tipo: 'transferencia.registrar', transferencia: { id: 'dv', mes: '2026-01', de: 'a', importe: c.t.a, fecha: '2026-01-20' } }], { por: 'b' });
+  assert.ok(r[0].ok, JSON.stringify(r));
+  assert.equal(N.cuadre(b.e, '2026-01').pendiente.a, 0);
+  assert.match(b.aplicar([{ tipo: 'transferencia.registrar', transferencia: { id: 'z', mes: '2026-01', de: 'a', importe: 0, fecha: '2026-01-20' } }], { por: 'b' })[0].error, /distinto de 0/);
+  assert.match(N.csv(b.e), /"La conjunta a Uno"/);
+});
+
+test('carpetas: agrupan gastos de varios meses, se cierran y solo se borran vacías', () => {
+  const b = baseLista();
+  const r = b.aplicar([
+    { tipo: 'carpeta.guardar', carpeta: { id: 'roma', nombre: 'Viaje a Roma', emoji: '✈️' } },
+    { tipo: 'gasto.guardar', gasto: { id: 'v1', fecha: '2026-03-30', desc: 'Vuelos', importe: 30000, cuenta: 'j', cat: 'viajes', carpeta: 'roma' } },
+    { tipo: 'gasto.guardar', gasto: { id: 'v2', fecha: '2026-04-02', desc: 'Hotel', importe: 45000, cuenta: 'a', cat: 'viajes', carpeta: 'roma' } },
+    { tipo: 'gasto.guardar', gasto: { id: 'n1', fecha: '2026-04-03', desc: 'Pan', importe: 200, cuenta: 'j', cat: 'compra' } },
+  ], { por: 'a' });
+  assert.ok(r.every((x) => x.ok), JSON.stringify(r));
+  assert.deepEqual(N.gastosDeCarpeta(b.e, 'roma').map((g) => g.id), ['v2', 'v1']);
+  assert.equal(N.cuadre(b.e, '2026-04').totalSueltos, 45200); // siguen contando en su mes
+  assert.equal(b.e.gastos.n1.carpeta, null);
+  assert.match(b.aplicar([{ tipo: 'gasto.guardar', gasto: { id: 'n2', fecha: '2026-04-03', desc: '', importe: 1, cuenta: 'j', cat: 'compra', carpeta: 'nada' } }], { por: 'a' })[0].error, /carpeta no existe/);
+  assert.match(b.aplicar([{ tipo: 'carpeta.guardar', carpeta: { id: 'otra', nombre: 'viaje a roma' } }], { por: 'a' })[0].error, /Ya hay/);
+  assert.match(b.aplicar([{ tipo: 'carpeta.borrar', carpeta: 'roma' }], { por: 'a' })[0].error, /ciérrala/);
+  b.aplicar([{ tipo: 'carpeta.cerrar', carpeta: 'roma', cerrada: true }], { por: 'b' });
+  assert.equal(N.carpetas(b.e).length, 0);
+  assert.equal(N.carpetas(b.e, { cerradas: true }).length, 1);
+  b.aplicar([{ tipo: 'carpeta.guardar', carpeta: { id: 'roma', nombre: 'Roma 2026', emoji: '' } }], { por: 'b' });
+  assert.deepEqual(b.e.carpetas.roma, { id: 'roma', nombre: 'Roma 2026', emoji: '📁', cerrada: true }); // renombrar no la reabre
+  b.aplicar([{ tipo: 'carpeta.guardar', carpeta: { id: 'vacia', nombre: 'Vacía' } }], { por: 'b' });
+  assert.ok(b.aplicar([{ tipo: 'carpeta.borrar', carpeta: 'vacia' }], { por: 'b' })[0].ok);
+  assert.match(N.csv(b.e), /"Hotel";"Viajes";"450,00";"Cuenta de Uno";"Roma 2026"/);
+});
+
+test('un historial de antes de las carpetas se sigue rehaciendo igual', () => {
+  const e = N.estadoVacio();
+  delete e.carpetas; // como un estado guardado en el móvil con la versión anterior
+  N.aplicarOp(e, { tipo: 'gasto.guardar', por: 'a', gasto: { id: 'g', fecha: '2026-01-01', desc: '', importe: 5, cuenta: 'j', cat: 'compra' } });
+  assert.equal(e.gastos.g.carpeta, null);
+  assert.deepEqual(N.carpetas(e), []);
 });

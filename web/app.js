@@ -97,14 +97,15 @@ function Transferir({ e, yo, mes }) {
       ${c.hecho.a + c.hecho.b > 0 && trs.length > 0 && html`<p class="nota">Este mes ya tiene transferencias apuntadas: si cambias importes, el pendiente se recalcula.</p>`}
       <div class="dos">${['a', 'b'].map((p) => html`<${Persona} key=${p} e=${e} c=${c} p=${p} yo=${yo} />`)}</div>
       ${c.pendiente[yo] > 0 && html`<button class="boton" onClick=${() => setTransf(c.pendiente[yo])}>Ya he transferido ${N.eur(c.pendiente[yo])}</button>`}
-      ${c.pendiente[yo] <= 0 && html`<button class="boton suave" onClick=${() => setTransf(0)}>Apuntar una transferencia</button>`}
+      ${c.pendiente[yo] < 0 && html`<button class="boton" onClick=${() => setTransf(c.pendiente[yo])}>La conjunta me ha devuelto ${N.eur(-c.pendiente[yo])}</button>`}
+      <button class="boton suave" onClick=${() => setTransf(0)}>Apuntar otra transferencia</button>
     </section>`}
     ${trs.length > 0 && html`<h2 class="seccion">Transferencias hechas</h2>
       <section class="tarjeta lista">${trs.map((t) => html`<div class="fila" key=${t.id}>
         <span class="ico">🏦</span>
-        <div class="texto"><strong>${N.nombre(e, t.de)} a la conjunta</strong><small>${N.etiquetaDia(t.fecha)}</small></div>
-        <b>${N.eur(t.importe)}</b>
-        <button class="icono" aria-label=${'Borrar transferencia de ' + N.eur(t.importe)} onClick=${() => hacer({ tipo: 'transferencia.borrar', transferencia: t.id },
+        <div class="texto"><strong>${t.importe > 0 ? N.nombre(e, t.de) + ' a la conjunta' : 'La conjunta a ' + N.nombre(e, t.de)}</strong><small>${N.etiquetaDia(t.fecha)}</small></div>
+        <b>${N.eur(Math.abs(t.importe))}</b>
+        <button class="icono" aria-label=${'Borrar transferencia de ' + N.eur(Math.abs(t.importe))} onClick=${() => hacer({ tipo: 'transferencia.borrar', transferencia: t.id },
           { deshacer: { texto: 'Transferencia borrada', ops: [{ tipo: 'transferencia.registrar', transferencia: { ...t } }] } })}>🗑</button>
       </div>`)}</section>`}
     <${PorCategoria} e=${e} lista=${[...c.fijos, ...c.sueltos]} total=${c.E} titulo="Gasto del mes por categoría" />
@@ -113,12 +114,13 @@ function Transferir({ e, yo, mes }) {
 }
 
 function Persona({ e, c, p, yo }) {
-  const pend = c.pendiente[p];
+  const pend = c.pendiente[p], arr = c.arrastre[p], tot = c.total[p];
   return html`<div class=${'persona' + (p === yo ? ' mia' : '')}>
     <small>${N.nombre(e, p)}${p === yo ? ' (tú)' : ''}</small>
-    ${c.t[p] >= 0 ? html`<b class="grande">${N.eur(c.t[p])}</b>` : html`<b class="grande">0,00 €</b><small class="pos">La conjunta te devuelve ${N.eur(-c.t[p])}</small>`}
+    ${tot >= 0 ? html`<b class="grande">${N.eur(tot)}</b>` : html`<b class="grande">0,00 €</b><small class="pos">La conjunta te devuelve ${N.eur(-tot)}</small>`}
+    ${arr !== 0 && html`<small class="arrastre">Este mes ${N.eur(c.t[p])} · ${arr > 0 ? 'pendiente de antes ' + N.eur(arr) : 'a tu favor de antes ' + N.eur(-arr)}</small>`}
     <small>Hecho: ${N.eur(c.hecho[p])}</small>
-    <small class=${'estado ' + (pend > 0 ? 'neg' : 'pos')}>${pend > 0 ? 'Pendiente: ' + N.eur(pend) : pend < 0 ? 'Sobra: ' + N.eur(-pend) : 'Al día ✓'}</small>
+    <small class=${'estado ' + (pend > 0 ? 'neg' : 'pos')}>${pend > 0 ? 'Pendiente: ' + N.eur(pend) : pend < 0 ? 'A tu favor: ' + N.eur(-pend) : 'Al día ✓'}</small>
     <div class="dejar">
       <small>Dejar en tu cuenta personal</small>
       <b>${N.eur(c.dejar[p])}</b>
@@ -129,20 +131,25 @@ function Persona({ e, c, p, yo }) {
 }
 
 function HojaTransferencia({ e, yo, mes, importe, cerrar }) {
-  const [txt, setTxt] = useState(importe ? N.enCasilla(importe) : '');
+  const [txt, setTxt] = useState(importe ? N.enCasilla(Math.abs(importe)) : '');
+  const [sentido, setSentido] = useState(importe < 0 ? -1 : 1);
   const [de, setDe] = useState(yo);
   const [fecha, setFecha] = useState(N.mesDe(N.hoy()) === mes ? N.hoy() : `${mes}-${String(N.diasDelMes(mes)).padStart(2, '0')}`);
   const guardar = () => {
     const c = N.aCentimos(txt);
     if (!c) return mensaje('Escribe un importe mayor que 0', 'error');
-    const t = { id: nuevoId(), mes, de, importe: c, fecha };
+    const t = { id: nuevoId(), mes, de, importe: c * sentido, fecha };
     if (hacer({ tipo: 'transferencia.registrar', transferencia: t }, { deshacer: { texto: 'Transferencia apuntada', ops: [{ tipo: 'transferencia.borrar', transferencia: t.id }] } })) cerrar();
   };
-  return html`<${Hoja} titulo="Transferencia a la conjunta" cerrar=${cerrar} pie=${html`<button class="boton" onClick=${guardar}>Guardar</button>`}>
+  return html`<${Hoja} titulo="Transferencia" cerrar=${cerrar} pie=${html`<button class="boton" onClick=${guardar}>Guardar</button>`}>
+    <div class="segmento" role="group" aria-label="Sentido">
+      <${Chip} activo=${sentido === 1} onClick=${() => setSentido(1)}>A la conjunta</${Chip}>
+      <${Chip} activo=${sentido === -1} onClick=${() => setSentido(-1)}>La conjunta devuelve</${Chip}>
+    </div>
     <label>Importe (€)<input class="grande" type="text" inputmode="decimal" value=${txt} onInput=${(ev) => setTxt(ev.target.value)} /></label>
-    <div class="campo"><span>Quién</span><div class="chips">${['a', 'b'].map((p) => html`<${Chip} activo=${de === p} onClick=${() => setDe(p)}>${N.nombre(e, p)}${p === yo ? ' (tú)' : ''}</${Chip}>`)}</div></div>
+    <div class="campo"><span>${sentido === 1 ? 'Quién transfiere' : 'A quién'}</span><div class="chips">${['a', 'b'].map((p) => html`<${Chip} activo=${de === p} onClick=${() => setDe(p)}>${N.nombre(e, p)}${p === yo ? ' (tú)' : ''}</${Chip}>`)}</div></div>
     <label>Fecha<input type="date" value=${fecha} onInput=${(ev) => ev.target.value && setFecha(ev.target.value)} /></label>
-    <p class="nota">Cuenta para ${N.etiquetaMes(mes)}.</p>
+    <p class="nota">Cuenta para ${N.etiquetaMes(mes)}. Lo que quede pendiente pasa a los meses siguientes.</p>
   </${Hoja}>`;
 }
 
@@ -199,7 +206,8 @@ function Mes({ e, yo, mes, abrirConcepto }) {
   return html`<div>
     <div class="fijo-arriba">
       ${c.hay ? html`<div class="dos">${['a', 'b'].map((p) => html`<div class=${'mini' + (p === yo ? ' mia' : '')} key=${p}>
-        <small>${N.nombre(e, p)} transfiere</small><b>${N.eur(Math.max(0, c.t[p]))}</b></div>`)}</div>`
+        <small>${N.nombre(e, p)} transfiere</small><b>${N.eur(Math.max(0, c.total[p]))}</b>
+        ${c.arrastre[p] !== 0 && html`<small>${c.arrastre[p] > 0 ? 'incl. ' + N.eur(c.arrastre[p]) + ' de antes' : 'descontado ' + N.eur(-c.arrastre[p]) + ' a favor'}</small>`}</div>`)}</div>`
         : html`<div class="mini"><small>Pon las nóminas para ver el reparto</small></div>`}
       <div class="segmento" role="group" aria-label="A qué meses afecta un cambio">
         <${Chip} activo=${modo === 'desde'} onClick=${() => setModo('desde')}>Desde este mes</${Chip}>
@@ -260,22 +268,64 @@ function HojaConcepto({ e, mes, concepto, cerrar }) {
   </${Hoja}>`;
 }
 
-/* ---------- Gastos sueltos ---------- */
-function Gastos({ e, mes, abrirGasto }) {
-  const lista = N.gastosDelMes(e, mes);
+/* ---------- Gastos sueltos y carpetas ---------- */
+function Gastos({ e, mes, abrirGasto, carpeta, setCarpeta }) {
+  const [verCerradas, setVerCerradas] = useState(false);
+  const [hojaCarpeta, setHojaCarpeta] = useState(null);
+  const abiertas = N.carpetas(e), cerradas = N.carpetas(e, { cerradas: true }).filter((c) => c.cerrada);
+  const actual = carpeta && e.carpetas && e.carpetas[carpeta];
+  const lista = actual ? N.gastosDeCarpeta(e, carpeta) : N.gastosDelMes(e, mes);
   const total = lista.reduce((s, g) => s + g.importe, 0);
   const dias = [];
   for (const g of lista) { const d = dias[dias.length - 1]; if (d && d.fecha === g.fecha) d.items.push(g); else dias.push({ fecha: g.fecha, items: [g] }); }
+  const chipCarpeta = (c) => html`<${Chip} key=${c.id} activo=${carpeta === c.id} onClick=${() => setCarpeta(carpeta === c.id ? null : c.id)}>${c.emoji} ${c.nombre}</${Chip}>`;
+  const borrar = () => hacer({ tipo: 'carpeta.borrar', carpeta: actual.id }) && setCarpeta(null);
   return html`<div>
-    <section class="tarjeta"><small class="nota">Gastos sueltos del mes</small><b class="total-grande">${N.eur(total)}</b>
-      <p class="nota">Salidas, compras puntuales… Los gastos fijos se cambian en la pestaña Mes.</p></section>
-    ${!lista.length && html`<p class="vacio">Aún no hay gastos sueltos este mes. Pulsa ＋ para añadir uno.</p>`}
-    ${dias.map((d) => html`<div key=${d.fecha}><h2 class="seccion cap">${N.etiquetaDia(d.fecha)}</h2>
+    <div class="chips carpetas" role="group" aria-label="Carpetas">
+      <${Chip} activo=${!actual} onClick=${() => setCarpeta(null)}>Este mes</${Chip}>
+      ${abiertas.map(chipCarpeta)}
+      ${verCerradas && cerradas.map(chipCarpeta)}
+      ${cerradas.length > 0 && html`<button class="chip suave" onClick=${() => setVerCerradas(!verCerradas)}>${verCerradas ? 'Ocultar cerradas' : `Cerradas (${cerradas.length})`}</button>`}
+      <button class="chip suave" onClick=${() => setHojaCarpeta({})}>＋ Carpeta</button>
+    </div>
+    ${actual ? html`<section class="tarjeta">
+        <small class="nota">${actual.emoji} Carpeta${actual.cerrada ? ' (cerrada)' : ''} · todas las fechas</small>
+        <b class="total-grande">${N.eur(total)}</b>
+        <p class="nota"><strong>${actual.nombre}</strong> · ${lista.length} ${lista.length === 1 ? 'gasto' : 'gastos'}${lista.length ? ` · del ${N.etiquetaDia(lista[lista.length - 1].fecha)} al ${N.etiquetaDia(lista[0].fecha)}` : ''}</p>
+        <div class="dos">
+          <button class="boton suave" onClick=${() => setHojaCarpeta({ ...actual })}>Cambiar nombre</button>
+          <button class="boton suave" onClick=${() => hacer({ tipo: 'carpeta.cerrar', carpeta: actual.id, cerrada: !actual.cerrada })}>${actual.cerrada ? 'Reabrir' : 'Cerrar carpeta'}</button>
+        </div>
+        ${!lista.length && html`<button class="boton peligro" onClick=${borrar}>Borrar carpeta</button>`}
+        ${actual.cerrada && html`<p class="nota">Cerrada: ya no se ofrece al apuntar gastos, pero sus gastos siguen contando.</p>`}
+      </section>
+      <${PorCategoria} e=${e} lista=${lista} total=${total} titulo="Por categoría" />`
+    : html`<section class="tarjeta"><small class="nota">Gastos sueltos del mes</small><b class="total-grande">${N.eur(total)}</b>
+      <p class="nota">Salidas, compras puntuales… Los gastos fijos se cambian en la pestaña Mes. Agrupa viajes o salidas en carpetas.</p></section>`}
+    ${!lista.length && html`<p class="vacio">${actual ? 'Esta carpeta aún no tiene gastos. Pulsa ＋ para añadir uno.' : 'Aún no hay gastos sueltos este mes. Pulsa ＋ para añadir uno.'}</p>`}
+    ${dias.map((d) => html`<div key=${d.fecha}><h2 class="seccion cap">${N.etiquetaDia(d.fecha)}${actual ? ' ' + d.fecha.slice(0, 4) : ''}</h2>
       <section class="tarjeta lista">${d.items.map((g) => html`<${FilaGasto} key=${g.id} e=${e} g=${g} abrir=${abrirGasto} />`)}</section></div>`)}
+    ${hojaCarpeta && html`<${HojaCarpeta} c=${hojaCarpeta} cerrar=${(id) => { setHojaCarpeta(null); if (id) setCarpeta(id); }} />`}
   </div>`;
 }
-const FilaGasto = ({ e, g, abrir }) => { const k = N.catDe(e, g.cat); return html`<button class="fila pulsable" onClick=${() => abrir(g)}>
-  <span class="ico">${k.emoji}</span><span class="texto"><strong>${g.desc || k.nombre}</strong><small>${N.nombreCuenta(e, g.cuenta)}</small></span><b>${N.eur(g.importe)}</b></button>`; };
+const FilaGasto = ({ e, g, abrir }) => {
+  const k = N.catDe(e, g.cat), cp = g.carpeta && e.carpetas && e.carpetas[g.carpeta];
+  return html`<button class="fila pulsable" onClick=${() => abrir(g)}>
+    <span class="ico">${k.emoji}</span><span class="texto"><strong>${g.desc || k.nombre}</strong><small>${N.nombreCuenta(e, g.cuenta)}${cp ? ` · ${cp.emoji} ${cp.nombre}` : ''}</small></span><b>${N.eur(g.importe)}</b></button>`;
+};
+function HojaCarpeta({ c, cerrar }) {
+  const [k, setK] = useState({ nombre: '', emoji: '📁', ...c });
+  const guardar = () => {
+    const id = k.id || nuevoId();
+    if (hacer({ tipo: 'carpeta.guardar', carpeta: { id, nombre: k.nombre, emoji: k.emoji } })) cerrar(id);
+  };
+  return html`<${Hoja} titulo=${c.id ? 'Cambiar nombre' : 'Nueva carpeta'} cerrar=${() => cerrar(null)} pie=${html`<button class="boton" onClick=${guardar}>Guardar</button>`}>
+    <label>Nombre<input type="text" maxlength="40" value=${k.nombre} placeholder="Ej. Viaje a Roma, Salidas" onInput=${(ev) => setK({ ...k, nombre: ev.target.value })} /></label>
+    <label>Emoji<input type="text" maxlength="8" value=${k.emoji} onInput=${(ev) => setK({ ...k, emoji: ev.target.value })} /></label>
+    <div class="chips sugerencias">${['✈️', '🏖️', '🎉', '🍻', '🎁', '🏠', '🚗', '📁'].map((x) => html`<${Chip} key=${x} activo=${k.emoji === x} onClick=${() => setK({ ...k, emoji: x })}>${x}</${Chip}>`)}</div>
+    <p class="nota">Los gastos de una carpeta siguen contando en su mes y en su categoría; la carpeta solo los agrupa.</p>
+  </${Hoja}>`;
+}
 
 function HojaGasto({ e, yo, mes, gasto, cerrar }) {
   const nuevo = !gasto.id;
@@ -284,10 +334,11 @@ function HojaGasto({ e, yo, mes, gasto, cerrar }) {
   const ref = useRef(null);
   useEffect(() => { if (nuevo && ref.current) ref.current.focus(); }, []);
   const pon = (c, v) => setG({ ...g, [c]: v });
+  const opcionesCarpeta = N.carpetas(e, { cerradas: true }).filter((c) => !c.cerrada || c.id === g.carpeta);
   const guardar = () => {
     const imp = N.aCentimos(txt);
     if (!imp) return mensaje('Escribe un importe mayor que 0', 'error');
-    const datos = { id: g.id || nuevoId(), fecha: g.fecha, desc: g.desc.trim(), importe: imp, cuenta: g.cuenta, cat: g.cat };
+    const datos = { id: g.id || nuevoId(), fecha: g.fecha, desc: g.desc.trim(), importe: imp, cuenta: g.cuenta, cat: g.cat, carpeta: g.carpeta || null };
     const vuelta = nuevo ? [{ tipo: 'gasto.borrar', gasto: datos.id }] : [{ tipo: 'gasto.guardar', gasto: { ...gasto } }];
     if (hacer({ tipo: 'gasto.guardar', gasto: datos }, { deshacer: { texto: nuevo ? 'Gasto añadido' : 'Gasto cambiado', ops: vuelta } })) cerrar();
   };
@@ -300,6 +351,9 @@ function HojaGasto({ e, yo, mes, gasto, cerrar }) {
     <div class="campo"><span>Categoría</span><div class="chips">${N.categorias(e).map((x) => html`<${Chip} key=${x.id} activo=${g.cat === x.id} onClick=${() => pon('cat', x.id)}>${x.emoji} ${x.nombre}</${Chip}>`)}</div></div>
     <div class="campo"><span>Se paga desde</span><div class="chips">${N.CUENTAS.map((x) => html`<${Chip} key=${x} activo=${g.cuenta === x} onClick=${() => pon('cuenta', x)}>${x === 'j' ? 'Cuenta conjunta' : N.nombre(e, x) + (x === yo ? ' (tú)' : '')}</${Chip}>`)}</div></div>
     <label>Fecha<input type="date" value=${g.fecha} onInput=${(ev) => ev.target.value && pon('fecha', ev.target.value)} /></label>
+    ${opcionesCarpeta.length > 0 && html`<div class="campo"><span>Carpeta</span><div class="chips">
+      <${Chip} activo=${!g.carpeta} onClick=${() => pon('carpeta', null)}>Ninguna</${Chip}>
+      ${opcionesCarpeta.map((c) => html`<${Chip} key=${c.id} activo=${g.carpeta === c.id} onClick=${() => pon('carpeta', c.id)}>${c.emoji} ${c.nombre}</${Chip}>`)}</div></div>`}
     ${!nuevo && html`<button class="boton peligro" onClick=${borrar}>Borrar gasto</button>`}
   </${Hoja}>`;
 }
@@ -500,6 +554,7 @@ function App() {
   const [tab, setTab] = useGuardado('gastos.pestana', 'transferir');
   const [mes, setMes] = useGuardado('gastos.mes', mesHoy());
   const [hoja, setHoja] = useState(null); // { tipo, datos }
+  const [carpeta, setCarpeta] = useGuardado('gastos.carpeta', null);
   const sv = s.servidor;
   const aviso = s.aviso && html`<div class=${'aviso ' + s.aviso.tipo} role="status">${s.aviso.texto}
     ${s.aviso.accion && html`<button onClick=${s.aviso.accion.fn}>${s.aviso.accion.texto}</button>`}
@@ -525,10 +580,10 @@ function App() {
       <${NavMes} mes=${mes} poner=${setMes} />
       ${tab === 'transferir' && h(Transferir, { e, yo, mes })}
       ${tab === 'mes' && h(Mes, { key: mes, e, yo, mes, abrirConcepto })}
-      ${tab === 'gastos' && h(Gastos, { e, mes, abrirGasto })}
+      ${tab === 'gastos' && h(Gastos, { e, mes, abrirGasto, carpeta, setCarpeta })}
       ${tab === 'paga' && h(Paga, { e, mes, abrirGasto })}
     </main>
-    <button class="mas" aria-label=${tab === 'mes' ? 'Añadir concepto' : 'Añadir gasto'} onClick=${() => (tab === 'mes' ? abrirConcepto(null) : abrirGasto(null))}>＋</button>
+    <button class="mas" aria-label=${tab === 'mes' ? 'Añadir concepto' : 'Añadir gasto'} onClick=${() => (tab === 'mes' ? abrirConcepto(null) : abrirGasto(tab === 'gastos' && carpeta && e.carpetas && e.carpetas[carpeta] && !e.carpetas[carpeta].cerrada ? { carpeta } : null))}>＋</button>
     <nav class="pestanas">${PESTANAS.map(([id, ico, nom]) => html`<button key=${id} class=${tab === id ? 'activa' : ''} aria-current=${tab === id ? 'page' : null}
       onClick=${() => { setTab(id); scrollTo(0, 0); }}><span aria-hidden="true">${ico}</span>${nom}</button>`)}</nav>
     ${hoja && hoja.tipo === 'gasto' && h(HojaGasto, { e, yo, mes, gasto: hoja.datos, cerrar: () => setHoja(null) })}

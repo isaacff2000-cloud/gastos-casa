@@ -74,6 +74,7 @@ export function estadoVacio() {
     gastos: {},                         // id → { id, fecha, desc, importe, cuenta, cat, por }
     transferencias: {},                 // id → { id, mes, de, importe, fecha, por }
     categorias: {},                     // id → { id, nombre, emoji, grupo }   (las añadidas)
+    carpetas: {},                       // id → { id, nombre, emoji, cerrada }  (viajes, salidas…)
   };
 }
 /** Lo que puede ver el móvil: todo menos las cuentas de Tailscale. */
@@ -189,10 +190,11 @@ const OPS = {
       exigir(typeof g.desc === 'string' && g.desc.length <= 60, 'La descripción es demasiado larga (máximo 60)');
       exigir(CUENTAS.includes(g.cuenta), 'Cuenta no válida');
       catOk(e, g.cat);
+      if (g.carpeta != null) exigir(e.carpetas && e.carpetas[g.carpeta], 'Esa carpeta no existe');
     },
     aplicar(e, o) {
       const g = o.gasto, antes = e.gastos[g.id];
-      e.gastos[g.id] = { id: g.id, fecha: g.fecha, desc: g.desc.trim(), importe: g.importe, cuenta: g.cuenta, cat: g.cat, por: antes ? antes.por : o.por };
+      e.gastos[g.id] = { id: g.id, fecha: g.fecha, desc: g.desc.trim(), importe: g.importe, cuenta: g.cuenta, cat: g.cat, carpeta: g.carpeta || null, por: antes ? antes.por : o.por };
     },
   },
   'gasto.borrar': {
@@ -206,7 +208,8 @@ const OPS = {
       exigir(RE_ID.test(t.id || ''), 'Identificador no válido');
       exigir(RE_MES.test(t.mes || '') && fechaValida(t.fecha), 'Fecha no válida');
       exigir(esPersona(t.de), 'Falta quién transfiere');
-      exigir(entero(t.importe, 1), 'Escribe un importe mayor que 0');
+      // Positivo: de la persona a la conjunta. Negativo: la conjunta le devuelve.
+      exigir(Number.isSafeInteger(t.importe) && t.importe !== 0 && entero(Math.abs(t.importe), 1), 'Escribe un importe distinto de 0');
     },
     aplicar(e, o) { const t = o.transferencia; e.transferencias[t.id] = { id: t.id, mes: t.mes, de: t.de, importe: t.importe, fecha: t.fecha, por: o.por }; },
   },
@@ -236,6 +239,34 @@ const OPS = {
       exigir(!usada, 'Esa categoría está en uso: cambia antes los gastos o conceptos que la usan');
     },
     aplicar(e, o) { delete e.categorias[o.categoria]; },
+  },
+
+  'carpeta.guardar': {
+    validar(e, o) {
+      deUno(o);
+      const c = o.carpeta || {};
+      exigir(RE_ID.test(c.id || ''), 'Identificador de carpeta no válido');
+      exigir(textoOk(c.nombre, 40), 'La carpeta necesita un nombre (máximo 40 letras)');
+      exigir(c.emoji == null || (typeof c.emoji === 'string' && c.emoji.length <= 16), 'Emoji no válido');
+      const n = norm(c.nombre);
+      exigir(!Object.values(e.carpetas || {}).some((x) => x.id !== c.id && norm(x.nombre) === n), `Ya hay una carpeta llamada «${c.nombre.trim()}»`);
+    },
+    aplicar(e, o) {
+      const c = o.carpeta, antes = (e.carpetas || (e.carpetas = {}))[c.id];
+      e.carpetas[c.id] = { id: c.id, nombre: c.nombre.trim(), emoji: (c.emoji || '').trim() || '📁', cerrada: antes ? antes.cerrada : false };
+    },
+  },
+  'carpeta.cerrar': {
+    validar(e, o) { deUno(o); exigir(e.carpetas && e.carpetas[o.carpeta], 'Esa carpeta no existe'); },
+    aplicar(e, o) { if (e.carpetas && e.carpetas[o.carpeta]) e.carpetas[o.carpeta].cerrada = o.cerrada !== false; },
+  },
+  'carpeta.borrar': {
+    validar(e, o) {
+      deUno(o);
+      exigir(e.carpetas && e.carpetas[o.carpeta], 'Esa carpeta no existe');
+      exigir(!Object.values(e.gastos).some((g) => g.carpeta === o.carpeta), 'La carpeta tiene gastos: ciérrala en lugar de borrarla');
+    },
+    aplicar(e, o) { if (e.carpetas) delete e.carpetas[o.carpeta]; },
   },
 };
 export const TIPOS = Object.keys(OPS);
@@ -288,7 +319,7 @@ export const transferenciasDelMes = (e, mes) => Object.values(e.transferencias).
  * partes iguales, de forma que los dos acaban con el mismo saldo libre.
  * borrador: { serie: céntimos } para recalcular mientras se escribe.
  */
-export function cuadre(e, mes, borrador = {}) {
+function cuadreMes(e, mes, borrador = {}) {
   const val = (s) => (s in borrador ? borrador[s] : importe(e, s, mes).v) || 0;
   const inc = { a: val('n:a'), b: val('n:b') };
   const fijos = conceptosDelMes(e, mes).map((c) => ({ concepto: c, importe: val('c:' + c.id), cuenta: c.cuenta, cat: c.cat }));
@@ -308,12 +339,56 @@ export function cuadre(e, mes, borrador = {}) {
   return {
     mes, inc, fijos, sueltos, E, P, F, t, hecho, dejar,
     libre: { a: dejar.a - P.a, b: dejar.b - P.b },
-    pendiente: { a: t.a - hecho.a, b: t.b - hecho.b },
     hay: inc.a + inc.b > 0,
     totalFijos: fijos.reduce((s, x) => s + x.importe, 0),
     totalSueltos: sueltos.reduce((s, x) => s + x.importe, 0),
   };
 }
+
+/** Primer mes con algún dato (importe, gasto o transferencia). */
+export function primerMes(e) {
+  let m = null;
+  const ver = (k) => { if (RE_MES.test(k) && (m === null || k < m)) m = k; };
+  for (const s of Object.values(e.series)) { for (const k in s.desde) ver(k); for (const k in s.puntual) ver(k); }
+  for (const g of Object.values(e.gastos)) ver(mesDe(g.fecha));
+  for (const t of Object.values(e.transferencias)) ver(t.mes);
+  return m;
+}
+
+/**
+ * Lo que cada uno arrastra de los meses anteriores: lo que le tocaba transferir y no transfirió
+ * (positivo) o lo que transfirió de más (negativo). Los meses sin nóminas no generan deuda,
+ * pero sus transferencias sí cuentan.
+ */
+export function arrastre(e, mes) {
+  const r = { a: 0, b: 0 };
+  let m = primerMes(e);
+  for (let n = 0; m && m < mes && n < 600; n++, m = sumarMes(m, 1)) {
+    const c = cuadreMes(e, m);
+    for (const p of ['a', 'b']) r[p] += (c.hay ? c.t[p] : 0) - c.hecho[p];
+  }
+  return r;
+}
+
+/**
+ * Cuadre del mes con lo arrastrado: total = lo del mes + lo de antes; pendiente = total − lo hecho.
+ * dejar y libre tienen en cuenta lo arrastrado (quien debe de antes, ese mes tiene menos libre).
+ */
+export function cuadre(e, mes, borrador = {}) {
+  const c = cuadreMes(e, mes, borrador);
+  const arr = arrastre(e, mes);
+  const total = { a: c.t.a + arr.a, b: c.t.b + arr.b };
+  const dejar = { a: c.inc.a - total.a, b: c.inc.b - total.b };
+  return {
+    ...c, arrastre: arr, total,
+    pendiente: { a: total.a - c.hecho.a, b: total.b - c.hecho.b },
+    dejar, libre: { a: dejar.a - c.P.a, b: dejar.b - c.P.b },
+  };
+}
+
+/** Gastos de una carpeta (todas las fechas), del más reciente al más antiguo. */
+export const gastosDeCarpeta = (e, id) => Object.values(e.gastos).filter((g) => g.carpeta === id).sort(porFecha);
+export const carpetas = (e, { cerradas = false } = {}) => Object.values(e.carpetas || {}).filter((c) => cerradas || !c.cerrada).sort((x, y) => x.nombre.localeCompare(y.nombre, 'es'));
 
 /** Gasto del mes por categoría, de mayor a menor: [{ cat, importe }] */
 export function porCategoria(lista) {
@@ -364,15 +439,19 @@ export function datosPaga(e, mes, gran) {
 export function csv(e) {
   const q = (s) => '"' + String(s ?? '').replace(/"/g, '""') + '"';
   const num = (c) => (c / 100).toFixed(2).replace('.', ',');
-  const filas = [['fecha', 'tipo', 'descripcion', 'categoria', 'importe', 'cuenta'].map(q).join(';')];
+  const filas = [['fecha', 'tipo', 'descripcion', 'categoria', 'importe', 'cuenta', 'carpeta'].map(q).join(';')];
+  const carpeta = (g) => (g.carpeta && e.carpetas && e.carpetas[g.carpeta] ? e.carpetas[g.carpeta].nombre : '');
   const meses = new Set([...Object.values(e.gastos).map((g) => mesDe(g.fecha)), ...Object.values(e.transferencias).map((t) => t.mes)]);
   for (const s of Object.values(e.series)) for (const m of [...Object.keys(s.desde), ...Object.keys(s.puntual)]) meses.add(m);
   for (const mes of [...meses].sort()) {
-    const c = cuadre(e, mes);
+    const c = cuadreMes(e, mes);
     for (const p of ['a', 'b']) if (c.inc[p]) filas.push([mes + '-01', 'nomina', 'Nómina ' + nombre(e, p), '', num(c.inc[p]), nombreCuenta(e, p)].map(q).join(';'));
     for (const f of c.fijos) if (f.importe) filas.push([mes + '-01', 'fijo', f.concepto.nombre, catDe(e, f.cat).nombre, num(f.importe), nombreCuenta(e, f.cuenta)].map(q).join(';'));
-    for (const g of [...c.sueltos].reverse()) filas.push([g.fecha, 'gasto', g.desc, catDe(e, g.cat).nombre, num(g.importe), nombreCuenta(e, g.cuenta)].map(q).join(';'));
-    for (const t of transferenciasDelMes(e, mes).reverse()) filas.push([t.fecha, 'transferencia', nombre(e, t.de) + ' a la conjunta', '', num(t.importe), nombreCuenta(e, t.de)].map(q).join(';'));
+    for (const g of [...c.sueltos].reverse()) filas.push([g.fecha, 'gasto', g.desc, catDe(e, g.cat).nombre, num(g.importe), nombreCuenta(e, g.cuenta), carpeta(g)].map(q).join(';'));
+    for (const t of transferenciasDelMes(e, mes).reverse()) {
+      const texto = t.importe > 0 ? nombre(e, t.de) + ' a la conjunta' : 'La conjunta a ' + nombre(e, t.de);
+      filas.push([t.fecha, 'transferencia', texto, '', num(t.importe), nombreCuenta(e, t.de), ''].map(q).join(';'));
+    }
   }
   return filas.join('\n') + '\n';
 }
