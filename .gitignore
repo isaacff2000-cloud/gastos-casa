@@ -1,0 +1,11 @@
+node_modules/
+datos/
+*.db
+*.db-*
+*.xlsx
+!test/fixtures/hoja.xlsx
+*.csv
+.env
+rclone.conf
+google*.json
+__pycache__/
