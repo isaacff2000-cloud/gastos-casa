@@ -287,3 +287,18 @@ Confirmación: **no creo ni borro nada fuera de mi espacio de trabajo sin pedír
 | 36 comprobaciones con dos móviles a la vez en Chromium (alta, tiempo real, escribir sin perder texto, solo este mes, los dos cambiando la misma cifra, deshacer, sin cobertura, transferencias, Paga, Ajustes, app instalada sin red) | Podman, quadlet, `tailscale serve` en el 8443 y convivencia con el menú |
 | Importación con la hoja real | Identidad real de Tailscale Serve |
 | Sintaxis de los scripts de instalación | Safari en iPhone · copia a Drive con rclone |
+
+## 15. Cambios tras la instalación (22-nov-2026)
+
+- **0.2.0 · Carpetas y arrastre.** Los gastos sueltos se pueden agrupar en carpetas (viajes, salidas…)
+  que muestran su total aunque abarquen varios meses; se cierran cuando ya no se usan. Lo que alguien
+  no transfiere a la conjunta en un mes se suma a los siguientes (y lo transferido de más se
+  descuenta); las devoluciones de la conjunta se apuntan como transferencia en sentido contrario.
+- **0.3.0 · Gastos sueltos como deudas entre los dos.** Cada gasto suelto dice quién lo pagó y cómo se
+  reparte (a medias por defecto, todo para uno, todo para el otro u otro porcentaje). En la pestaña
+  Gastos sale quién le debe a quién y se salda apuntando un pago. **Los gastos sueltos ya no entran en
+  el reparto mensual**: Transferir y Mes quedan con nóminas y gastos fijos. Paga pierde el medidor del
+  margen libre y muestra lo gastado y lo que le toca a cada uno. No hay opción de cuenta conjunta para
+  los gastos sueltos; los antiguos de la conjunta se conservan sin generar deuda.
+- Actualización: el portátil instala solo la versión nueva cada noche (`podman-auto-update.timer`,
+  hacia las 00:05); para hacerlo al momento, `podman auto-update` como isaac.
