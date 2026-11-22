@@ -2,10 +2,12 @@
 
 Rehacer la app de gastos de Apps Script (Google Sheets) como la del menú semanal: un servidor
 en el portátil de casa y una app instalable en los móviles, sin depender de Google.
-Estado (22-nov-2026): **fases 1 y 2 construidas y probadas aquí** (pruebas unitarias, dos móviles con
-Playwright e importación con la hoja real). Falta lo que necesita tu escritorio: crear el repositorio,
-que GitHub construya la imagen e instalarla en el portátil. La fase 3 (copia a Drive) está escrita
-pero sin probar.
+Estado (22-nov-2026): **instalada en el portátil y funcionando** en el puerto 8443 de Tailscale, junto al
+menú (que sigue intacto). Repositorio público `isaacff2000-cloud/gastos-casa`; GitHub pasó las pruebas,
+la prueba con dos móviles y construyó la imagen. Importados los 14 conceptos (2.705 €/mes) desde
+noviembre de 2026. Pendiente: que cada uno elija «Soy …» en su móvil, poner las nóminas en la pestaña
+Mes y, cuando os fiéis, dejar de usar la app de Apps Script. La fase 3 (copia a Drive) está escrita pero
+sin probar.
 
 ## 1. Qué se mantiene y qué cambia
 
