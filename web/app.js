@@ -108,7 +108,7 @@ function Transferir({ e, yo, mes }) {
         <button class="icono" aria-label=${'Borrar transferencia de ' + N.eur(Math.abs(t.importe))} onClick=${() => hacer({ tipo: 'transferencia.borrar', transferencia: t.id },
           { deshacer: { texto: 'Transferencia borrada', ops: [{ tipo: 'transferencia.registrar', transferencia: { ...t } }] } })}>🗑</button>
       </div>`)}</section>`}
-    <${PorCategoria} e=${e} lista=${[...c.fijos, ...c.sueltos]} total=${c.E} titulo="Gasto del mes por categoría" />
+    <${PorCategoria} e=${e} lista=${c.fijos} total=${c.E} titulo="Gastos fijos del mes por categoría" />
     ${transf !== null && html`<${HojaTransferencia} e=${e} yo=${yo} mes=${mes} importe=${transf} cerrar=${() => setTransf(null)} />`}
   </div>`;
 }
@@ -222,7 +222,6 @@ function Mes({ e, yo, mes, abrirConcepto }) {
       ${c.fijos.map(({ concepto: k }) => fila('c:' + k.id, k.nombre, N.nombreCuenta(e, k.cuenta), N.catDe(e, k.cat).emoji,
         html`<button class="icono" aria-label=${'Editar ' + k.nombre} onClick=${() => abrirConcepto(k)}>✎</button>`))}
       <div class="par total"><span>Total fijos</span><b>${N.eur(c.totalFijos)}</b></div>
-      ${c.totalSueltos > 0 && html`<div class="par"><span>Gastos sueltos del mes</span><span>${N.eur(c.totalSueltos)}</span></div>`}
     </section>
     <p class="nota">En gris, lo que viene del mes anterior. Se recalcula al escribir y se guarda al salir de la casilla. «Desde este mes» cambia también los meses siguientes que no tengan su propio importe.</p>
     <button class="boton suave" onClick=${() => abrirConcepto(null)}>＋ Añadir concepto</button>
@@ -269,7 +268,51 @@ function HojaConcepto({ e, mes, concepto, cerrar }) {
 }
 
 /* ---------- Gastos sueltos y carpetas ---------- */
-function Gastos({ e, mes, abrirGasto, carpeta, setCarpeta }) {
+/** Lo que uno le debe al otro por los gastos sueltos, y los pagos para saldarlo. */
+function Deudas({ e, yo }) {
+  const [hojaPago, setHojaPago] = useState(null);
+  const [verPagos, setVerPagos] = useState(false);
+  const s = N.saldo(e); // positivo: «b» le debe a «a»
+  const deudor = s > 0 ? 'b' : 'a', acreedor = s > 0 ? 'a' : 'b';
+  const pagos = N.pagosEntreVosotros(e);
+  const quien = (p) => N.nombre(e, p) + (p === yo ? ' (tú)' : '');
+  return html`<section class="tarjeta deudas">
+    ${s === 0 ? html`<small class="nota">Deudas entre vosotros</small><b class="total-grande pos">Estáis en paz ✓</b>`
+      : html`<small class="nota">${deudor === yo ? 'Le debes a ' + N.nombre(e, acreedor) : quien(deudor) + ' le debe a ' + quien(acreedor)}</small>
+        <b class="total-grande">${N.eur(Math.abs(s))}</b>`}
+    <p class="nota">Por los gastos sueltos: quien paga adelanta y el otro le debe su parte.</p>
+    <div class="dos">
+      <button class="boton${s === 0 ? ' suave' : ''}" onClick=${() => setHojaPago({ de: s === 0 ? yo : deudor, importe: Math.abs(s) })}>${s === 0 ? 'Apuntar un pago' : 'Saldar'}</button>
+      ${pagos.length > 0 && html`<button class="boton suave" onClick=${() => setVerPagos(!verPagos)}>${verPagos ? 'Ocultar pagos' : `Pagos (${pagos.length})`}</button>`}
+    </div>
+    ${verPagos && html`<div class="lista">${pagos.map((p) => html`<div class="fila" key=${p.id}><span class="ico">🤝</span>
+      <div class="texto"><strong>${N.nombre(e, p.de)} pagó a ${N.nombre(e, p.de === 'a' ? 'b' : 'a')}</strong><small>${N.etiquetaDia(p.fecha)} ${p.fecha.slice(0, 4)}</small></div>
+      <b>${N.eur(p.importe)}</b>
+      <button class="icono" aria-label=${'Borrar pago de ' + N.eur(p.importe)} onClick=${() => hacer({ tipo: 'pago.borrar', pago: p.id },
+        { deshacer: { texto: 'Pago borrado', ops: [{ tipo: 'pago.registrar', pago: { ...p } }] } })}>🗑</button></div>`)}</div>`}
+    ${hojaPago && html`<${HojaPago} e=${e} yo=${yo} inicial=${hojaPago} cerrar=${() => setHojaPago(null)} />`}
+  </section>`;
+}
+function HojaPago({ e, yo, inicial, cerrar }) {
+  const [de, setDe] = useState(inicial.de);
+  const [txt, setTxt] = useState(inicial.importe ? N.enCasilla(inicial.importe) : '');
+  const [fecha, setFecha] = useState(N.hoy());
+  const otro = de === 'a' ? 'b' : 'a';
+  const guardar = () => {
+    const c = N.aCentimos(txt);
+    if (!c) return mensaje('Escribe un importe mayor que 0', 'error');
+    const p = { id: nuevoId(), de, importe: c, fecha };
+    if (hacer({ tipo: 'pago.registrar', pago: p }, { deshacer: { texto: 'Pago apuntado', ops: [{ tipo: 'pago.borrar', pago: p.id }] } })) cerrar();
+  };
+  return html`<${Hoja} titulo="Pago entre vosotros" cerrar=${cerrar} pie=${html`<button class="boton" onClick=${guardar}>Guardar</button>`}>
+    <div class="campo"><span>Quién paga</span><div class="chips">${['a', 'b'].map((p) => html`<${Chip} key=${p} activo=${de === p} onClick=${() => setDe(p)}>${N.nombre(e, p)}${p === yo ? ' (tú)' : ''}</${Chip}>`)}</div></div>
+    <label>Importe (€)<input class="grande" type="text" inputmode="decimal" value=${txt} onInput=${(ev) => setTxt(ev.target.value)} /></label>
+    <label>Fecha<input type="date" value=${fecha} onInput=${(ev) => ev.target.value && setFecha(ev.target.value)} /></label>
+    <p class="nota">${N.nombre(e, de)} le paga a ${N.nombre(e, otro)} (Bizum, transferencia…). Solo se apunta aquí: no mueve dinero.</p>
+  </${Hoja}>`;
+}
+
+function Gastos({ e, yo, mes, abrirGasto, carpeta, setCarpeta }) {
   const [verCerradas, setVerCerradas] = useState(false);
   const [hojaCarpeta, setHojaCarpeta] = useState(null);
   const abiertas = N.carpetas(e), cerradas = N.carpetas(e, { cerradas: true }).filter((c) => c.cerrada);
@@ -281,6 +324,7 @@ function Gastos({ e, mes, abrirGasto, carpeta, setCarpeta }) {
   const chipCarpeta = (c) => html`<${Chip} key=${c.id} activo=${carpeta === c.id} onClick=${() => setCarpeta(carpeta === c.id ? null : c.id)}>${c.emoji} ${c.nombre}</${Chip}>`;
   const borrar = () => hacer({ tipo: 'carpeta.borrar', carpeta: actual.id }) && setCarpeta(null);
   return html`<div>
+    <${Deudas} e=${e} yo=${yo} />
     <div class="chips carpetas" role="group" aria-label="Carpetas">
       <${Chip} activo=${!actual} onClick=${() => setCarpeta(null)}>Este mes</${Chip}>
       ${abiertas.map(chipCarpeta)}
@@ -301,7 +345,7 @@ function Gastos({ e, mes, abrirGasto, carpeta, setCarpeta }) {
       </section>
       <${PorCategoria} e=${e} lista=${lista} total=${total} titulo="Por categoría" />`
     : html`<section class="tarjeta"><small class="nota">Gastos sueltos del mes</small><b class="total-grande">${N.eur(total)}</b>
-      <p class="nota">Salidas, compras puntuales… Los gastos fijos se cambian en la pestaña Mes. Agrupa viajes o salidas en carpetas.</p></section>`}
+      <p class="nota">Salidas, compras puntuales… Van aparte del reparto mensual: solo cuentan para las deudas entre vosotros. Agrupa viajes o salidas en carpetas.</p></section>`}
     ${!lista.length && html`<p class="vacio">${actual ? 'Esta carpeta aún no tiene gastos. Pulsa ＋ para añadir uno.' : 'Aún no hay gastos sueltos este mes. Pulsa ＋ para añadir uno.'}</p>`}
     ${dias.map((d) => html`<div key=${d.fecha}><h2 class="seccion cap">${N.etiquetaDia(d.fecha)}${actual ? ' ' + d.fecha.slice(0, 4) : ''}</h2>
       <section class="tarjeta lista">${d.items.map((g) => html`<${FilaGasto} key=${g.id} e=${e} g=${g} abrir=${abrirGasto} />`)}</section></div>`)}
@@ -311,7 +355,7 @@ function Gastos({ e, mes, abrirGasto, carpeta, setCarpeta }) {
 const FilaGasto = ({ e, g, abrir }) => {
   const k = N.catDe(e, g.cat), cp = g.carpeta && e.carpetas && e.carpetas[g.carpeta];
   return html`<button class="fila pulsable" onClick=${() => abrir(g)}>
-    <span class="ico">${k.emoji}</span><span class="texto"><strong>${g.desc || k.nombre}</strong><small>${N.nombreCuenta(e, g.cuenta)}${cp ? ` · ${cp.emoji} ${cp.nombre}` : ''}</small></span><b>${N.eur(g.importe)}</b></button>`;
+    <span class="ico">${k.emoji}</span><span class="texto"><strong>${g.desc || k.nombre}</strong><small>${g.paga === 'j' ? 'Cuenta conjunta' : 'Pagó ' + N.nombre(e, g.paga) + ' · ' + N.textoReparto(e, g)}${cp ? ` · ${cp.emoji} ${cp.nombre}` : ''}</small></span><b>${N.eur(g.importe)}</b></button>`;
 };
 function HojaCarpeta({ c, cerrar }) {
   const [k, setK] = useState({ nombre: '', emoji: '📁', ...c });
@@ -329,7 +373,12 @@ function HojaCarpeta({ c, cerrar }) {
 
 function HojaGasto({ e, yo, mes, gasto, cerrar }) {
   const nuevo = !gasto.id;
-  const [g, setG] = useState(() => ({ desc: '', cat: 'compra', cuenta: yo, fecha: N.mesDe(N.hoy()) === mes ? N.hoy() : `${mes}-01`, ...gasto }));
+  const [g, setG] = useState(() => {
+    const x = { desc: '', cat: 'compra', paga: yo, parte: 50, fecha: N.mesDe(N.hoy()) === mes ? N.hoy() : `${mes}-01`, ...gasto };
+    if (x.paga !== 'a' && x.paga !== 'b') x.paga = yo; // gastos antiguos de la conjunta: hay que elegir quién pagó
+    return x;
+  });
+  const [otroPct, setOtroPct] = useState(String(gasto.parte ?? 50));
   const [txt, setTxt] = useState(gasto.importe ? N.enCasilla(gasto.importe) : '');
   const ref = useRef(null);
   useEffect(() => { if (nuevo && ref.current) ref.current.focus(); }, []);
@@ -338,7 +387,7 @@ function HojaGasto({ e, yo, mes, gasto, cerrar }) {
   const guardar = () => {
     const imp = N.aCentimos(txt);
     if (!imp) return mensaje('Escribe un importe mayor que 0', 'error');
-    const datos = { id: g.id || nuevoId(), fecha: g.fecha, desc: g.desc.trim(), importe: imp, cuenta: g.cuenta, cat: g.cat, carpeta: g.carpeta || null };
+    const datos = { id: g.id || nuevoId(), fecha: g.fecha, desc: g.desc.trim(), importe: imp, paga: g.paga, parte: g.parte, cat: g.cat, carpeta: g.carpeta || null };
     const vuelta = nuevo ? [{ tipo: 'gasto.borrar', gasto: datos.id }] : [{ tipo: 'gasto.guardar', gasto: { ...gasto } }];
     if (hacer({ tipo: 'gasto.guardar', gasto: datos }, { deshacer: { texto: nuevo ? 'Gasto añadido' : 'Gasto cambiado', ops: vuelta } })) cerrar();
   };
@@ -349,13 +398,36 @@ function HojaGasto({ e, yo, mes, gasto, cerrar }) {
     <label>Importe (€)<input ref=${ref} class="grande" type="text" inputmode="decimal" placeholder="0,00" value=${txt} onInput=${(ev) => setTxt(ev.target.value)} /></label>
     <label>Descripción<input type="text" maxlength="60" placeholder="Ej. Mercadona, cena…" value=${g.desc} onInput=${(ev) => pon('desc', ev.target.value)} /></label>
     <div class="campo"><span>Categoría</span><div class="chips">${N.categorias(e).map((x) => html`<${Chip} key=${x.id} activo=${g.cat === x.id} onClick=${() => pon('cat', x.id)}>${x.emoji} ${x.nombre}</${Chip}>`)}</div></div>
-    <div class="campo"><span>Se paga desde</span><div class="chips">${N.CUENTAS.map((x) => html`<${Chip} key=${x} activo=${g.cuenta === x} onClick=${() => pon('cuenta', x)}>${x === 'j' ? 'Cuenta conjunta' : N.nombre(e, x) + (x === yo ? ' (tú)' : '')}</${Chip}>`)}</div></div>
+    <div class="campo"><span>Lo ha pagado</span><div class="chips">${['a', 'b'].map((x) => html`<${Chip} key=${x} activo=${g.paga === x} onClick=${() => pon('paga', x)}>${N.nombre(e, x)}${x === yo ? ' (tú)' : ''}</${Chip}>`)}</div></div>
+    <${Reparto} e=${e} g=${g} txt=${txt} poner=${(v) => pon('parte', v)} otroPct=${otroPct} setOtroPct=${setOtroPct} />
     <label>Fecha<input type="date" value=${g.fecha} onInput=${(ev) => ev.target.value && pon('fecha', ev.target.value)} /></label>
     ${opcionesCarpeta.length > 0 && html`<div class="campo"><span>Carpeta</span><div class="chips">
       <${Chip} activo=${!g.carpeta} onClick=${() => pon('carpeta', null)}>Ninguna</${Chip}>
       ${opcionesCarpeta.map((c) => html`<${Chip} key=${c.id} activo=${g.carpeta === c.id} onClick=${() => pon('carpeta', c.id)}>${c.emoji} ${c.nombre}</${Chip}>`)}</div></div>`}
     ${!nuevo && html`<button class="boton peligro" onClick=${borrar}>Borrar gasto</button>`}
   </${Hoja}>`;
+}
+
+/** Cómo se reparte un gasto: a medias, todo para uno, todo para el otro u otro porcentaje. */
+function Reparto({ e, g, txt, poner, otroPct, setOtroPct }) {
+  const otro = g.paga === 'a' ? 'b' : 'a';
+  const parteDe = (p) => (p === 'a' ? 100 : 0); // «todo para p» en % de «a»
+  const opciones = [[50, 'A medias'], [parteDe(otro), 'Todo para ' + N.nombre(e, otro)], [parteDe(g.paga), 'Todo para ' + N.nombre(e, g.paga)]];
+  const enOpciones = opciones.some(([v]) => v === g.parte);
+  const [libre, setLibre] = useState(!enOpciones);
+  const imp = N.aCentimos(txt) || 0;
+  const pt = N.partes({ importe: imp, parte: g.parte });
+  const debe = otro === 'a' ? pt.a : pt.b;
+  return html`<div class="campo"><span>Cómo se reparte</span>
+    <div class="chips">
+      ${opciones.map(([v, t]) => html`<${Chip} key=${t} activo=${!libre && g.parte === v} onClick=${() => { setLibre(false); poner(v); }}>${t}</${Chip}>`)}
+      <${Chip} activo=${libre} onClick=${() => { setLibre(true); const n = Number(otroPct); if (Number.isInteger(n) && n >= 0 && n <= 100) poner(n); }}>Otro %</${Chip}>
+    </div>
+    ${libre && html`<label>Le toca a ${N.nombre(e, 'a')} (%)<input type="text" inputmode="numeric" value=${otroPct}
+      onInput=${(ev) => { setOtroPct(ev.target.value); const n = Number(ev.target.value); if (ev.target.value !== '' && Number.isInteger(n) && n >= 0 && n <= 100) poner(n); }} />
+      <small class="nota">${N.nombre(e, 'b')}: ${100 - g.parte} %</small></label>`}
+    ${imp > 0 && html`<p class="nota resumen-reparto">${(debe > 0 ? `${N.nombre(e, otro)} le deberá ${N.eur(debe)} a ${N.nombre(e, g.paga)}` : 'No genera deuda') + ` · le toca a ${N.nombre(e, 'a')} ${N.eur(pt.a)} y a ${N.nombre(e, 'b')} ${N.eur(pt.b)}`}</p>`}
+  </div>`;
 }
 
 /* ---------- Paga: visualización de los gastos sueltos ---------- */
@@ -370,11 +442,8 @@ function Paga({ e, mes, abrirGasto }) {
   const usados = new Set();
   for (const p of periodos) p.vals.forEach((v, i) => { if (v > 0) usados.add(i); });
   const sueltosMes = c.totalSueltos;
-  const margen = c.inc.a + c.inc.b - (c.E - sueltosMes);
-  const queda = margen - sueltosMes;
-  const pct = margen > 0 ? sueltosMes / margen : sueltosMes > 0 ? 2 : 0;
-  const estado = pct >= 1 ? ['mal', '⚠ Os pasáis del margen libre'] : pct >= 0.75 ? ['ojo', '⚠ Cerca del límite del margen'] : ['bien', '✓ Vais bien'];
-  const esHoy = mes === mesHoy();
+  const toca = { a: 0, b: 0 };
+  for (const g of c.sueltos) if (g.paga !== 'j') { const pt = N.partes(g); toca.a += pt.a; toca.b += pt.b; }
 
   let ambito, tituloAmbito;
   if (sel != null && periodos[sel]) { ambito = periodos[sel].items; tituloAmbito = periodos[sel].titulo; }
@@ -388,16 +457,10 @@ function Paga({ e, mes, abrirGasto }) {
 
   return html`<div>
     <section class="tarjeta">
-      ${c.hay ? html`<small class="nota">Libre que os queda a cada uno</small>
-        <div class=${'heroe' + (queda < 0 ? ' neg' : '')}>${N.eur(Math.round(queda / 2))}</div>
-        <div class="medidor" role="img" aria-label=${`Gastado el ${Math.round(Math.min(pct, 9.99) * 100)}% del margen libre`}>
-          <div class=${'medidor-relleno ' + estado[0]} style=${{ width: Math.min(100, pct * 100) + '%' }}></div>
-          ${esHoy && html`<div class="medidor-hoy" style=${{ left: (Number(N.hoy().slice(8)) / N.diasDelMes(mes) * 100) + '%' }}></div>`}
-        </div>
-        <div class="par"><span>${estado[1]}</span><span class="nota">${N.eur(sueltosMes)} de ${N.eur(Math.max(0, margen))}</span></div>
-        ${esHoy && html`<small class="nota">La marca vertical es el día de hoy.</small>`}`
-      : html`<small class="nota">Gastado en sueltos este mes</small><div class="heroe">${N.eur(sueltosMes)}</div>
-        <p class="nota">Pon las nóminas en la pestaña Mes para ver el margen que os queda.</p>`}
+      <small class="nota">Gastado en sueltos este mes</small>
+      <div class="heroe">${N.eur(sueltosMes)}</div>
+      ${sueltosMes > 0 && html`<div class="par"><span>Le toca a ${N.nombre(e, 'a')}</span><b>${N.eur(toca.a)}</b></div>
+        <div class="par"><span>Le toca a ${N.nombre(e, 'b')}</span><b>${N.eur(toca.b)}</b></div>`}
     </section>
     <section class="tarjeta">
       <div class="segmento"><${Chip} activo=${gran === 'semana'} onClick=${() => setGran('semana')}>Semanas</${Chip}><${Chip} activo=${gran === 'mes'} onClick=${() => setGran('mes')}>Meses</${Chip}></div>
@@ -580,7 +643,7 @@ function App() {
       <${NavMes} mes=${mes} poner=${setMes} />
       ${tab === 'transferir' && h(Transferir, { e, yo, mes })}
       ${tab === 'mes' && h(Mes, { key: mes, e, yo, mes, abrirConcepto })}
-      ${tab === 'gastos' && h(Gastos, { e, mes, abrirGasto, carpeta, setCarpeta })}
+      ${tab === 'gastos' && h(Gastos, { e, yo, mes, abrirGasto, carpeta, setCarpeta })}
       ${tab === 'paga' && h(Paga, { e, mes, abrirGasto })}
     </main>
     <button class="mas" aria-label=${tab === 'mes' ? 'Añadir concepto' : 'Añadir gasto'} onClick=${() => (tab === 'mes' ? abrirConcepto(null) : abrirGasto(tab === 'gastos' && carpeta && e.carpetas && e.carpetas[carpeta] && !e.carpetas[carpeta].cerrada ? { carpeta } : null))}>＋</button>

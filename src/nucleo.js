@@ -71,7 +71,9 @@ export function estadoVacio() {
     logins: { a: null, b: null },      // solo en el servidor (publico() lo quita)
     conceptos: {},                      // id → { id, nombre, cat, cuenta, orden, desde, hasta }
     series: {},                         // 'n:a' | 'n:b' | 'c:<concepto>' → { desde: {mes: importe}, puntual: {mes: importe} }
-    gastos: {},                         // id → { id, fecha, desc, importe, cuenta, cat, por }
+    gastos: {},                         // id → { id, fecha, desc, importe, paga, parte, cat, carpeta, por }
+                                        //   paga: quién lo pagó (a | b); parte: % que le toca a «a» (0–100)
+    pagos: {},                          // id → { id, de, importe, fecha, por }  (uno le paga al otro para saldar)
     transferencias: {},                 // id → { id, mes, de, importe, fecha, por }
     categorias: {},                     // id → { id, nombre, emoji, grupo }   (las añadidas)
     carpetas: {},                       // id → { id, nombre, emoji, cerrada }  (viajes, salidas…)
@@ -188,13 +190,17 @@ const OPS = {
       exigir(fechaValida(g.fecha), 'Fecha no válida');
       exigir(entero(g.importe, 1), 'Escribe un importe mayor que 0');
       exigir(typeof g.desc === 'string' && g.desc.length <= 60, 'La descripción es demasiado larga (máximo 60)');
-      exigir(CUENTAS.includes(g.cuenta), 'Cuenta no válida');
+      exigir(esPersona(g.paga), 'Falta quién lo ha pagado');
+      exigir(Number.isInteger(g.parte) && g.parte >= 0 && g.parte <= 100, 'Reparto no válido (porcentaje de 0 a 100)');
       catOk(e, g.cat);
       if (g.carpeta != null) exigir(e.carpetas && e.carpetas[g.carpeta], 'Esa carpeta no existe');
     },
     aplicar(e, o) {
       const g = o.gasto, antes = e.gastos[g.id];
-      e.gastos[g.id] = { id: g.id, fecha: g.fecha, desc: g.desc.trim(), importe: g.importe, cuenta: g.cuenta, cat: g.cat, carpeta: g.carpeta || null, por: antes ? antes.por : o.por };
+      // Los gastos de antes llevaban «cuenta» (a | b | j): pagó esa persona, a medias; los de la conjunta no generan deuda
+      const paga = esPersona(g.paga) ? g.paga : esPersona(g.cuenta) ? g.cuenta : 'j';
+      const parte = Number.isInteger(g.parte) ? g.parte : 50;
+      e.gastos[g.id] = { id: g.id, fecha: g.fecha, desc: g.desc.trim(), importe: g.importe, paga, parte, cat: g.cat, carpeta: g.carpeta || null, por: antes ? antes.por : o.por };
     },
   },
   'gasto.borrar': {
@@ -239,6 +245,22 @@ const OPS = {
       exigir(!usada, 'Esa categoría está en uso: cambia antes los gastos o conceptos que la usan');
     },
     aplicar(e, o) { delete e.categorias[o.categoria]; },
+  },
+
+  'pago.registrar': {
+    validar(e, o) {
+      deUno(o);
+      const p = o.pago || {};
+      exigir(RE_ID.test(p.id || ''), 'Identificador no válido');
+      exigir(esPersona(p.de), 'Falta quién paga');
+      exigir(entero(p.importe, 1), 'Escribe un importe mayor que 0');
+      exigir(fechaValida(p.fecha), 'Fecha no válida');
+    },
+    aplicar(e, o) { const p = o.pago; (e.pagos || (e.pagos = {}))[p.id] = { id: p.id, de: p.de, importe: p.importe, fecha: p.fecha, por: o.por }; },
+  },
+  'pago.borrar': {
+    validar(e, o) { deUno(o); exigir(e.pagos && e.pagos[o.pago], 'Ese pago ya no existe'); },
+    aplicar(e, o) { if (e.pagos) delete e.pagos[o.pago]; },
   },
 
   'carpeta.guardar': {
@@ -315,18 +337,19 @@ export const gastosDelMes = (e, mes) => Object.values(e.gastos).filter((g) => me
 export const transferenciasDelMes = (e, mes) => Object.values(e.transferencias).filter((t) => t.mes === mes).sort(porFecha);
 
 /**
- * Cuadre del mes (misma fórmula que el Excel): se pagan todos los gastos y lo que sobra se reparte a
- * partes iguales, de forma que los dos acaban con el mismo saldo libre.
+ * Cuadre del mes (misma fórmula que el Excel): se pagan las nóminas y los gastos fijos y lo que sobra se
+ * reparte a partes iguales, de forma que los dos acaban con el mismo saldo libre. Los gastos sueltos no
+ * entran aquí: cada uno dice quién lo pagó y cómo se reparte, y generan deudas entre los dos (saldo()).
  * borrador: { serie: céntimos } para recalcular mientras se escribe.
  */
 function cuadreMes(e, mes, borrador = {}) {
   const val = (s) => (s in borrador ? borrador[s] : importe(e, s, mes).v) || 0;
   const inc = { a: val('n:a'), b: val('n:b') };
   const fijos = conceptosDelMes(e, mes).map((c) => ({ concepto: c, importe: val('c:' + c.id), cuenta: c.cuenta, cat: c.cat }));
-  const sueltos = gastosDelMes(e, mes);
+  const sueltos = gastosDelMes(e, mes); // solo informativo: los gastos sueltos van aparte, como deudas entre los dos
   let E = 0;
   const P = { a: 0, b: 0 };
-  for (const x of [...fijos, ...sueltos]) {
+  for (const x of fijos) {
     E += x.importe;
     if (x.cuenta === 'a' || x.cuenta === 'b') P[x.cuenta] += x.importe;
   }
@@ -386,6 +409,35 @@ export function cuadre(e, mes, borrador = {}) {
   };
 }
 
+/* ---------- Deudas entre los dos (gastos sueltos) ---------- */
+/** Lo que le toca pagar a cada uno de un gasto suelto. */
+export function partes(g) {
+  const a = Math.round(g.importe * g.parte / 100);
+  return { a, b: g.importe - a };
+}
+/** Deuda que crea un gasto: positivo = «b» le debe a «a»; negativo = «a» le debe a «b». */
+export function deudaDe(g) {
+  if (g.paga === 'a') return partes(g).b;
+  if (g.paga === 'b') return -partes(g).a;
+  return 0; // gastos antiguos de la cuenta conjunta
+}
+/** Saldo entre los dos: positivo = «b» le debe a «a». */
+export function saldo(e) {
+  let s = 0;
+  for (const g of Object.values(e.gastos)) s += deudaDe(g);
+  for (const p of Object.values(e.pagos || {})) s += p.de === 'b' ? -p.importe : p.importe;
+  return s;
+}
+export const pagosEntreVosotros = (e) => Object.values(e.pagos || {}).sort(porFecha);
+/** Texto del reparto: «a medias», «70 % / 30 %», «todo para Ana»… */
+export function textoReparto(e, g) {
+  if (g.paga === 'j') return 'cuenta conjunta';
+  if (g.parte === 50) return 'a medias';
+  if (g.parte === 100) return 'todo para ' + nombre(e, 'a');
+  if (g.parte === 0) return 'todo para ' + nombre(e, 'b');
+  return `${nombre(e, 'a')} ${g.parte} % · ${nombre(e, 'b')} ${100 - g.parte} %`;
+}
+
 /** Gastos de una carpeta (todas las fechas), del más reciente al más antiguo. */
 export const gastosDeCarpeta = (e, id) => Object.values(e.gastos).filter((g) => g.carpeta === id).sort(porFecha);
 export const carpetas = (e, { cerradas = false } = {}) => Object.values(e.carpetas || {}).filter((c) => cerradas || !c.cerrada).sort((x, y) => x.nombre.localeCompare(y.nombre, 'es'));
@@ -439,18 +491,25 @@ export function datosPaga(e, mes, gran) {
 export function csv(e) {
   const q = (s) => '"' + String(s ?? '').replace(/"/g, '""') + '"';
   const num = (c) => (c / 100).toFixed(2).replace('.', ',');
-  const filas = [['fecha', 'tipo', 'descripcion', 'categoria', 'importe', 'cuenta', 'carpeta'].map(q).join(';')];
+  const filas = [['fecha', 'tipo', 'descripcion', 'categoria', 'importe', 'cuenta o quien paga', 'carpeta', 'le toca a ' + nombre(e, 'a'), 'le toca a ' + nombre(e, 'b')].map(q).join(';')];
   const carpeta = (g) => (g.carpeta && e.carpetas && e.carpetas[g.carpeta] ? e.carpetas[g.carpeta].nombre : '');
   const meses = new Set([...Object.values(e.gastos).map((g) => mesDe(g.fecha)), ...Object.values(e.transferencias).map((t) => t.mes)]);
   for (const s of Object.values(e.series)) for (const m of [...Object.keys(s.desde), ...Object.keys(s.puntual)]) meses.add(m);
+  for (const p of Object.values(e.pagos || {})) meses.add(mesDe(p.fecha));
   for (const mes of [...meses].sort()) {
     const c = cuadreMes(e, mes);
     for (const p of ['a', 'b']) if (c.inc[p]) filas.push([mes + '-01', 'nomina', 'Nómina ' + nombre(e, p), '', num(c.inc[p]), nombreCuenta(e, p)].map(q).join(';'));
     for (const f of c.fijos) if (f.importe) filas.push([mes + '-01', 'fijo', f.concepto.nombre, catDe(e, f.cat).nombre, num(f.importe), nombreCuenta(e, f.cuenta)].map(q).join(';'));
-    for (const g of [...c.sueltos].reverse()) filas.push([g.fecha, 'gasto', g.desc, catDe(e, g.cat).nombre, num(g.importe), nombreCuenta(e, g.cuenta), carpeta(g)].map(q).join(';'));
+    for (const g of [...c.sueltos].reverse()) {
+      const pt = g.paga === 'j' ? { a: 0, b: 0 } : partes(g);
+      filas.push([g.fecha, 'gasto', g.desc, catDe(e, g.cat).nombre, num(g.importe), g.paga === 'j' ? 'Cuenta conjunta' : 'Pagó ' + nombre(e, g.paga), carpeta(g), num(pt.a), num(pt.b)].map(q).join(';'));
+    }
     for (const t of transferenciasDelMes(e, mes).reverse()) {
       const texto = t.importe > 0 ? nombre(e, t.de) + ' a la conjunta' : 'La conjunta a ' + nombre(e, t.de);
       filas.push([t.fecha, 'transferencia', texto, '', num(t.importe), nombreCuenta(e, t.de), ''].map(q).join(';'));
+    }
+    for (const p of pagosEntreVosotros(e).filter((x) => mesDe(x.fecha) === mes).reverse()) {
+      filas.push([p.fecha, 'pago entre vosotros', nombre(e, p.de) + ' paga a ' + nombre(e, p.de === 'a' ? 'b' : 'a'), '', num(p.importe), '', ''].map(q).join(';'));
     }
   }
   return filas.join('\n') + '\n';

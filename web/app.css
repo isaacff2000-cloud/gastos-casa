@@ -168,3 +168,6 @@ label input { margin-top: 6px; text-transform: none; letter-spacing: 0; color: v
 .sugerencias { margin-top: 8px; }
 .persona .arrastre { color: var(--tinta); }
 .mini small { font-size: 11px; }
+
+.deudas .total-grande.pos { color: var(--pos); font-size: 26px; }
+.resumen-reparto { margin: 8px 0 0; }

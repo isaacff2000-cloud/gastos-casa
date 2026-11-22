@@ -11,11 +11,13 @@ Este repositorio solo tiene código: ningún dato, correo ni clave. Los datos vi
 - **Transferir:** cuánto pasa cada uno a la cuenta conjunta y cuánto deja en su cuenta personal
   (recibos que paga desde ella + libre). Todo es común y lo que sobra se reparte a partes iguales.
   Lo que no se transfiere en un mes se arrastra a los siguientes (y lo transferido de más, también).
-- **Mes:** nóminas y gastos fijos del mes, que se arrastran solos de un mes a otro. Cada cambio vale
+- **Mes:** nóminas y gastos fijos del mes (lo único que entra en el reparto con la conjunta), que se arrastran solos de un mes a otro. Cada cambio vale
   «desde este mes» o «solo este mes». El resultado se recalcula mientras se escribe.
-- **Gastos:** gastos sueltos del día a día, de cualquiera de las tres cuentas, que se pueden agrupar
-  en **carpetas** (un viaje, salidas…) con su total aunque ocupen varios meses.
-- **Paga:** margen libre que queda, gráfica por semanas o meses y por categoría, tabla y mayores gastos.
+- **Gastos:** gastos sueltos del día a día. Cada uno dice quién lo pagó y cómo se reparte (a medias
+  por defecto, todo para uno u otro porcentaje); arriba sale quién le debe a quién y se salda con un
+  pago. Van aparte del reparto mensual. Se pueden agrupar en **carpetas** (un viaje, salidas…).
+- **Paga:** lo gastado en sueltos y lo que le toca a cada uno; gráfica por semanas o meses y por
+  categoría, tabla y mayores gastos.
 - **Ajustes:** categorías propias, descarga de una copia de seguridad, CSV.
 - Funciona sin cobertura (los cambios esperan y se envían al volver la red) y lo que hace uno le
   aparece al otro al momento. Lo que se está escribiendo nunca se borra por cambios del otro.
