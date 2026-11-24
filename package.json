@@ -1,6 +1,6 @@
 {
   "name": "gastos-casa",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Gastos a dos: reparto de gastos de casa en un servidor de casa",
   "type": "module",
   "private": true,

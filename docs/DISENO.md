@@ -124,7 +124,7 @@ Un id repetido se confirma sin aplicarse otra vez. Una operación inválida se r
 claro y se descarta de la cola del móvil.
 
 ### API
-`GET /api/salud` · `GET /api/estado` (ETag = último `seq`) · `POST /api/ops` ·
+`GET /api/salud` · `GET /api/estado` (ETag = versión de la app + último `seq`) · `POST /api/ops` ·
 `GET /api/eventos` (SSE) · `GET /api/copia` (descarga de la base) · `GET /api/csv`.
 
 ### Sin cobertura y escritura
@@ -300,5 +300,9 @@ Confirmación: **no creo ni borro nada fuera de mi espacio de trabajo sin pedír
   el reparto mensual**: Transferir y Mes quedan con nóminas y gastos fijos. Paga pierde el medidor del
   margen libre y muestra lo gastado y lo que le toca a cada uno. No hay opción de cuenta conjunta para
   los gastos sueltos; los antiguos de la conjunta se conservan sin generar deuda.
+- **0.3.1 · Copia del móvil tras actualizar.** El ETag de `/api/estado` solo dependía del `seq`: tras
+  instalar la 0.3.0 sin ningún cambio nuevo, el móvil recibía «304» y seguía con su copia de la 0.2.0,
+  cuyos gastos no traían «paga» ni «parte» (salía «Isaac undefined % · Ana NaN %» y el saldo no los
+  contaba). Ahora el ETag lleva también la versión, así que cada actualización trae los datos de nuevo.
 - Actualización: el portátil instala solo la versión nueva cada noche (`podman-auto-update.timer`,
   hacia las 00:05); para hacerlo al momento, `podman auto-update` como isaac.

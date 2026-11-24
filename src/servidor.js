@@ -70,7 +70,9 @@ export function crearServidor({ base, carpetaWeb, carpetaTmp, version = 'dev', l
 
     'GET /api/estado': (req, res) => {
       const q = quien(req), m = modo(q);
-      const etag = `"${base.seq}-${m}-${q.p || ''}"`;
+      // La versión va en el ETag: tras actualizar, el móvil no puede quedarse con una copia de la versión anterior
+      // (misma seq, pero los datos ya salen con otra forma: p. ej. los gastos de 0.2.0 sin «paga» ni «parte»)
+      const etag = `"${version}-${base.seq}-${m}-${q.p || ''}"`;
       if (req.headers['if-none-match'] === etag) { res.writeHead(304, { ETag: etag, ...SEGURIDAD }); res.end(); return undefined; }
       const cuerpo = { seq: base.seq, modo: m, yo: q.p };
       if (m === 'ok') cuerpo.datos = publico(base.e);

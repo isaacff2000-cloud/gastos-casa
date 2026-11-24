@@ -472,3 +472,24 @@ test('deudas: quién pagó, cómo se reparte y pagos para saldar', () => {
   assert.equal(N.saldo(b.e), -1001);
   assert.match(N.csv(b.e), /"Súper";"Comida";"100,00";"Pagó Dos";"";"70,00";"30,00"/);
 });
+
+test('servidor: tras actualizar la app, el móvil no se queda con la copia de la versión anterior', async () => {
+  const base = new Base(':memory:');
+  base.aplicar([{ tipo: 'persona.nombrar', persona: 'a', nombre: 'Uno' }], SIS);
+  base.aplicar([{ tipo: 'persona.reclamar', persona: 'a', nombre: 'Uno' }], { login: 'uno@x' });
+  base.aplicar([{ tipo: 'persona.reclamar', persona: 'b', nombre: 'Dos' }], { login: 'dos@x' });
+  const antes = await arrancar(base, { version: '1.0.0' });
+  let etag;
+  try {
+    const r = await pedir(antes.puerto, 'GET', '/api/estado', { cab: TS('uno@x') });
+    assert.equal(r.json.modo, 'ok');
+    etag = r.cab.etag;
+    assert.equal((await pedir(antes.puerto, 'GET', '/api/estado', { cab: { ...TS('uno@x'), 'if-none-match': etag } })).codigo, 304);
+  } finally { antes.s.close(); }
+  const despues = await arrancar(base, { version: '1.0.1' }); // misma base, mismo seq
+  try {
+    const r = await pedir(despues.puerto, 'GET', '/api/estado', { cab: { ...TS('uno@x'), 'if-none-match': etag } });
+    assert.equal(r.codigo, 200);
+    assert.ok(r.json.datos);
+  } finally { despues.s.close(); }
+});
