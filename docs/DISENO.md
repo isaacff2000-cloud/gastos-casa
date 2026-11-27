@@ -306,3 +306,13 @@ Confirmación: **no creo ni borro nada fuera de mi espacio de trabajo sin pedír
   contaba). Ahora el ETag lleva también la versión, así que cada actualización trae los datos de nuevo.
 - Actualización: el portátil instala solo la versión nueva cada noche (`podman-auto-update.timer`,
   hacia las 00:05); para hacerlo al momento, `podman auto-update` como isaac.
+- **0.4.0 · Cada carpeta lleva sus cuentas.** Hasta ahora las carpetas solo agrupaban gastos, pero lo que
+  os debéis salía en un único total que lo juntaba todo. Ahora cada carpeta tiene su propio saldo y sus
+  propios pagos, y los gastos sin carpeta forman otro apartado. Dentro de una carpeta, la tarjeta de deudas
+  muestra solo lo de esa carpeta y «Saldar» apunta el pago en ella. Fuera, sale la lista de apartados con
+  algo pendiente (cada uno con su «Saldar»), el total juntándolo todo como referencia y «Saldar todo», que
+  apunta un pago por apartado (un solo Bizum, pero cada carpeta queda a cero). Al apuntar un pago se elige
+  qué apartado salda. Cerrar una carpeta no borra lo que se debe en ella: sigue en la lista hasta saldarlo,
+  y una carpeta con pagos no se puede borrar. **Sin migración:** los pagos de antes no llevaban carpeta y
+  cuentan para los gastos sin carpeta, que es lo que saldaban; el historial se rehace igual. El CSV añade
+  la carpeta de cada pago.

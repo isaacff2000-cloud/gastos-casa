@@ -170,4 +170,8 @@ label input { margin-top: 6px; text-transform: none; letter-spacing: 0; color: v
 .mini small { font-size: 11px; }
 
 .deudas .total-grande.pos { color: var(--pos); font-size: 26px; }
+.deudas .lista { margin: 8px 0 4px; }
+.deudas .fila { gap: 10px; }
+.deudas .enlace { padding: 0; text-align: left; color: inherit; font-size: inherit; }
+.boton.pequeno { width: auto; margin: 0; padding: 7px 12px; font-size: 14px; border-radius: 10px; flex: none; }
 .resumen-reparto { margin: 8px 0 0; }

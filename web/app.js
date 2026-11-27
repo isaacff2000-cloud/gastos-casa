@@ -268,47 +268,89 @@ function HojaConcepto({ e, mes, concepto, cerrar }) {
 }
 
 /* ---------- Gastos sueltos y carpetas ---------- */
-/** Lo que uno le debe al otro por los gastos sueltos, y los pagos para saldarlo. */
-function Deudas({ e, yo }) {
+/**
+ * Lo que uno le debe al otro por los gastos sueltos, y los pagos para saldarlo. Cada carpeta lleva sus
+ * cuentas aparte (y los gastos sin carpeta, las suyas): dentro de una carpeta se ve y se salda solo lo suyo.
+ */
+const nombreAmbito = (e, k) => (k && e.carpetas && e.carpetas[k] ? `${e.carpetas[k].emoji} ${e.carpetas[k].nombre}` : 'Gastos sin carpeta');
+function Deudas({ e, yo, carpeta, setCarpeta }) {
   const [hojaPago, setHojaPago] = useState(null);
   const [verPagos, setVerPagos] = useState(false);
-  const s = N.saldo(e); // positivo: «b» le debe a «a»
-  const deudor = s > 0 ? 'b' : 'a', acreedor = s > 0 ? 'a' : 'b';
-  const pagos = N.pagosEntreVosotros(e);
+  const enCarpeta = carpeta != null;
+  const filas = enCarpeta ? [{ carpeta, s: N.saldo(e, carpeta) }].filter((x) => x.s !== 0) : N.saldos(e);
+  const total = filas.reduce((t, x) => t + x.s, 0);
+  const pagos = N.pagosEntreVosotros(e, enCarpeta ? carpeta : undefined);
   const quien = (p) => N.nombre(e, p) + (p === yo ? ' (tú)' : '');
+  const frase = (s) => { const deudor = s > 0 ? 'b' : 'a', acreedor = s > 0 ? 'a' : 'b'; return deudor === yo ? 'Le debes a ' + N.nombre(e, acreedor) : quien(deudor) + ' le debe a ' + quien(acreedor); };
+  const saldar = (x) => setHojaPago({ de: x.s > 0 ? 'b' : 'a', importe: Math.abs(x.s), carpeta: x.carpeta });
+  const una = filas.length === 1 ? filas[0] : null;
   return html`<section class="tarjeta deudas">
-    ${s === 0 ? html`<small class="nota">Deudas entre vosotros</small><b class="total-grande pos">Estáis en paz ✓</b>`
-      : html`<small class="nota">${deudor === yo ? 'Le debes a ' + N.nombre(e, acreedor) : quien(deudor) + ' le debe a ' + quien(acreedor)}</small>
-        <b class="total-grande">${N.eur(Math.abs(s))}</b>`}
-    <p class="nota">Por los gastos sueltos: quien paga adelanta y el otro le debe su parte.</p>
+    ${!filas.length ? html`<small class="nota">${enCarpeta ? 'Deudas en ' + nombreAmbito(e, carpeta) : 'Deudas entre vosotros'}</small><b class="total-grande pos">Estáis en paz ✓</b>`
+      : una ? html`<small class="nota">${enCarpeta || una.carpeta ? nombreAmbito(e, una.carpeta) + ' · ' : ''}${frase(una.s)}</small>
+        <b class="total-grande">${N.eur(Math.abs(una.s))}</b>`
+      : html`<small class="nota">Deudas entre vosotros, carpeta a carpeta</small>
+        <div class="lista">${filas.map((x) => html`<div class="fila" key=${x.carpeta || '-'}>
+          <div class="texto">${x.carpeta ? html`<button class="enlace" onClick=${() => setCarpeta(x.carpeta)}><strong>${nombreAmbito(e, x.carpeta)}</strong></button>` : html`<strong>${nombreAmbito(e, null)}</strong>`}<small>${frase(x.s)}</small></div>
+          <b>${N.eur(Math.abs(x.s))}</b>
+          <button class="boton suave pequeno" onClick=${() => saldar(x)}>Saldar</button></div>`)}</div>
+        <p class="nota">${total === 0 ? 'Juntándolo todo, quedaríais en paz.' : `En total, juntándolo todo: ${frase(total)} ${N.eur(Math.abs(total))}.`}</p>`}
+    <p class="nota">${enCarpeta ? 'Solo los gastos y pagos de esta carpeta: quien paga adelanta y el otro le debe su parte.' : 'Por los gastos sueltos: quien paga adelanta y el otro le debe su parte. Cada carpeta lleva sus cuentas aparte.'}</p>
     <div class="dos">
-      <button class="boton${s === 0 ? ' suave' : ''}" onClick=${() => setHojaPago({ de: s === 0 ? yo : deudor, importe: Math.abs(s) })}>${s === 0 ? 'Apuntar un pago' : 'Saldar'}</button>
+      ${una ? html`<button class="boton" onClick=${() => saldar(una)}>Saldar</button>`
+        : filas.length > 1 ? html`<button class="boton" onClick=${() => setHojaPago({ todo: filas })}>Saldar todo</button>`
+        : html`<button class="boton suave" onClick=${() => setHojaPago({ de: yo, importe: 0, carpeta: enCarpeta ? carpeta : null })}>Apuntar un pago</button>`}
       ${pagos.length > 0 && html`<button class="boton suave" onClick=${() => setVerPagos(!verPagos)}>${verPagos ? 'Ocultar pagos' : `Pagos (${pagos.length})`}</button>`}
     </div>
     ${verPagos && html`<div class="lista">${pagos.map((p) => html`<div class="fila" key=${p.id}><span class="ico">🤝</span>
-      <div class="texto"><strong>${N.nombre(e, p.de)} pagó a ${N.nombre(e, p.de === 'a' ? 'b' : 'a')}</strong><small>${N.etiquetaDia(p.fecha)} ${p.fecha.slice(0, 4)}</small></div>
+      <div class="texto"><strong>${N.nombre(e, p.de)} pagó a ${N.nombre(e, p.de === 'a' ? 'b' : 'a')}</strong><small>${N.etiquetaDia(p.fecha)} ${p.fecha.slice(0, 4)}${enCarpeta ? '' : ' · ' + nombreAmbito(e, p.carpeta)}</small></div>
       <b>${N.eur(p.importe)}</b>
       <button class="icono" aria-label=${'Borrar pago de ' + N.eur(p.importe)} onClick=${() => hacer({ tipo: 'pago.borrar', pago: p.id },
         { deshacer: { texto: 'Pago borrado', ops: [{ tipo: 'pago.registrar', pago: { ...p } }] } })}>🗑</button></div>`)}</div>`}
-    ${hojaPago && html`<${HojaPago} e=${e} yo=${yo} inicial=${hojaPago} cerrar=${() => setHojaPago(null)} />`}
+    ${hojaPago && (hojaPago.todo ? html`<${HojaSaldarTodo} e=${e} filas=${hojaPago.todo} frase=${frase} cerrar=${() => setHojaPago(null)} />`
+      : html`<${HojaPago} e=${e} yo=${yo} inicial=${hojaPago} cerrar=${() => setHojaPago(null)} />`)}
   </section>`;
 }
 function HojaPago({ e, yo, inicial, cerrar }) {
   const [de, setDe] = useState(inicial.de);
   const [txt, setTxt] = useState(inicial.importe ? N.enCasilla(inicial.importe) : '');
   const [fecha, setFecha] = useState(N.hoy());
+  const [carpeta, setCarpeta] = useState(inicial.carpeta || null);
   const otro = de === 'a' ? 'b' : 'a';
+  // Carpetas abiertas, más la de partida y las cerradas que aún tengan algo pendiente
+  const opciones = N.carpetas(e, { cerradas: true }).filter((c) => !c.cerrada || c.id === inicial.carpeta || N.saldo(e, c.id) !== 0);
+  const elegir = (k) => {
+    setCarpeta(k);
+    const s = N.saldo(e, k); // propone lo que queda pendiente en ese apartado
+    if (s !== 0) { setDe(s > 0 ? 'b' : 'a'); setTxt(N.enCasilla(Math.abs(s))); }
+  };
   const guardar = () => {
     const c = N.aCentimos(txt);
     if (!c) return mensaje('Escribe un importe mayor que 0', 'error');
-    const p = { id: nuevoId(), de, importe: c, fecha };
+    const p = { id: nuevoId(), de, importe: c, fecha, carpeta };
     if (hacer({ tipo: 'pago.registrar', pago: p }, { deshacer: { texto: 'Pago apuntado', ops: [{ tipo: 'pago.borrar', pago: p.id }] } })) cerrar();
   };
   return html`<${Hoja} titulo="Pago entre vosotros" cerrar=${cerrar} pie=${html`<button class="boton" onClick=${guardar}>Guardar</button>`}>
     <div class="campo"><span>Quién paga</span><div class="chips">${['a', 'b'].map((p) => html`<${Chip} key=${p} activo=${de === p} onClick=${() => setDe(p)}>${N.nombre(e, p)}${p === yo ? ' (tú)' : ''}</${Chip}>`)}</div></div>
     <label>Importe (€)<input class="grande" type="text" inputmode="decimal" value=${txt} onInput=${(ev) => setTxt(ev.target.value)} /></label>
     <label>Fecha<input type="date" value=${fecha} onInput=${(ev) => ev.target.value && setFecha(ev.target.value)} /></label>
-    <p class="nota">${N.nombre(e, de)} le paga a ${N.nombre(e, otro)} (Bizum, transferencia…). Solo se apunta aquí: no mueve dinero.</p>
+    ${opciones.length > 0 && html`<div class="campo"><span>Salda las deudas de</span><div class="chips">
+      <${Chip} activo=${!carpeta} onClick=${() => elegir(null)}>Sin carpeta</${Chip}>
+      ${opciones.map((c) => html`<${Chip} key=${c.id} activo=${carpeta === c.id} onClick=${() => elegir(c.id)}>${c.emoji} ${c.nombre}</${Chip}>`)}</div></div>`}
+    <p class="nota">${N.nombre(e, de)} le paga a ${N.nombre(e, otro)} (Bizum, transferencia…) por ${carpeta ? 'la carpeta ' + nombreAmbito(e, carpeta) : 'los gastos sin carpeta'}. Solo se apunta aquí: no mueve dinero.</p>
+  </${Hoja}>`;
+}
+/** Un solo Bizum para todo: se apunta un pago en cada carpeta, para que cada una quede a cero. */
+function HojaSaldarTodo({ e, filas, frase, cerrar }) {
+  const [fecha, setFecha] = useState(N.hoy());
+  const guardar = () => {
+    const pagos = filas.map((x) => ({ id: nuevoId(), de: x.s > 0 ? 'b' : 'a', importe: Math.abs(x.s), fecha, carpeta: x.carpeta }));
+    if (hacer(pagos.map((p) => ({ tipo: 'pago.registrar', pago: p })),
+      { deshacer: { texto: 'Todo saldado', ops: pagos.map((p) => ({ tipo: 'pago.borrar', pago: p.id })) } })) cerrar();
+  };
+  return html`<${Hoja} titulo="Saldar todo" cerrar=${cerrar} pie=${html`<button class="boton" onClick=${guardar}>Apuntar ${filas.length} pagos</button>`}>
+    <div class="lista">${filas.map((x) => html`<div class="fila" key=${x.carpeta || '-'}><div class="texto"><strong>${nombreAmbito(e, x.carpeta)}</strong><small>${frase(x.s)}</small></div><b>${N.eur(Math.abs(x.s))}</b></div>`)}</div>
+    <label>Fecha<input type="date" value=${fecha} onInput=${(ev) => ev.target.value && setFecha(ev.target.value)} /></label>
+    <p class="nota">Se apunta un pago en cada apartado, así cada carpeta queda a cero por separado. Solo se apunta aquí: no mueve dinero.</p>
   </${Hoja}>`;
 }
 
@@ -324,7 +366,7 @@ function Gastos({ e, yo, mes, abrirGasto, carpeta, setCarpeta }) {
   const chipCarpeta = (c) => html`<${Chip} key=${c.id} activo=${carpeta === c.id} onClick=${() => setCarpeta(carpeta === c.id ? null : c.id)}>${c.emoji} ${c.nombre}</${Chip}>`;
   const borrar = () => hacer({ tipo: 'carpeta.borrar', carpeta: actual.id }) && setCarpeta(null);
   return html`<div>
-    <${Deudas} e=${e} yo=${yo} />
+    <${Deudas} e=${e} yo=${yo} carpeta=${actual ? actual.id : null} setCarpeta=${setCarpeta} />
     <div class="chips carpetas" role="group" aria-label="Carpetas">
       <${Chip} activo=${!actual} onClick=${() => setCarpeta(null)}>Este mes</${Chip}>
       ${abiertas.map(chipCarpeta)}

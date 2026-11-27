@@ -255,8 +255,10 @@ const OPS = {
       exigir(esPersona(p.de), 'Falta quién paga');
       exigir(entero(p.importe, 1), 'Escribe un importe mayor que 0');
       exigir(fechaValida(p.fecha), 'Fecha no válida');
+      if (p.carpeta != null) exigir(e.carpetas && e.carpetas[p.carpeta], 'Esa carpeta no existe');
     },
-    aplicar(e, o) { const p = o.pago; (e.pagos || (e.pagos = {}))[p.id] = { id: p.id, de: p.de, importe: p.importe, fecha: p.fecha, por: o.por }; },
+    // Cada pago salda las deudas de una carpeta, o las de los gastos sin carpeta (null, como los de antes)
+    aplicar(e, o) { const p = o.pago; (e.pagos || (e.pagos = {}))[p.id] = { id: p.id, de: p.de, importe: p.importe, fecha: p.fecha, carpeta: p.carpeta || null, por: o.por }; },
   },
   'pago.borrar': {
     validar(e, o) { deUno(o); exigir(e.pagos && e.pagos[o.pago], 'Ese pago ya no existe'); },
@@ -287,6 +289,7 @@ const OPS = {
       deUno(o);
       exigir(e.carpetas && e.carpetas[o.carpeta], 'Esa carpeta no existe');
       exigir(!Object.values(e.gastos).some((g) => g.carpeta === o.carpeta), 'La carpeta tiene gastos: ciérrala en lugar de borrarla');
+      exigir(!Object.values(e.pagos || {}).some((p) => p.carpeta === o.carpeta), 'La carpeta tiene pagos apuntados: ciérrala en lugar de borrarla');
     },
     aplicar(e, o) { if (e.carpetas) delete e.carpetas[o.carpeta]; },
   },
@@ -421,14 +424,29 @@ export function deudaDe(g) {
   if (g.paga === 'b') return -partes(g).a;
   return 0; // gastos antiguos de la cuenta conjunta
 }
+/**
+ * Las deudas se llevan por separado en cada carpeta y en los gastos sin carpeta: cada apartado tiene su
+ * saldo y sus pagos. ambito: undefined = todo junto · null = sin carpeta · id = esa carpeta.
+ */
+const enAmbito = (x, ambito) => ambito === undefined || (x.carpeta || null) === ambito;
 /** Saldo entre los dos: positivo = «b» le debe a «a». */
-export function saldo(e) {
+export function saldo(e, ambito) {
   let s = 0;
-  for (const g of Object.values(e.gastos)) s += deudaDe(g);
-  for (const p of Object.values(e.pagos || {})) s += p.de === 'b' ? -p.importe : p.importe;
+  for (const g of Object.values(e.gastos)) if (enAmbito(g, ambito)) s += deudaDe(g);
+  for (const p of Object.values(e.pagos || {})) if (enAmbito(p, ambito)) s += p.de === 'b' ? -p.importe : p.importe;
   return s;
 }
-export const pagosEntreVosotros = (e) => Object.values(e.pagos || {}).sort(porFecha);
+/** Saldo de cada apartado con algo pendiente: primero los gastos sin carpeta, luego las carpetas por nombre. */
+export function saldos(e) {
+  const m = new Map();
+  const sumar = (k, v) => m.set(k, (m.get(k) || 0) + v);
+  for (const g of Object.values(e.gastos)) sumar(g.carpeta || null, deudaDe(g));
+  for (const p of Object.values(e.pagos || {})) sumar(p.carpeta || null, p.de === 'b' ? -p.importe : p.importe);
+  const nom = (k) => (k && e.carpetas && e.carpetas[k] ? e.carpetas[k].nombre : '');
+  return [...m].filter(([, s]) => s !== 0).map(([carpeta, s]) => ({ carpeta, s }))
+    .sort((x, y) => (x.carpeta !== null) - (y.carpeta !== null) || nom(x.carpeta).localeCompare(nom(y.carpeta), 'es'));
+}
+export const pagosEntreVosotros = (e, ambito) => Object.values(e.pagos || {}).filter((p) => enAmbito(p, ambito)).sort(porFecha);
 /** Texto del reparto: «a medias», «70 % / 30 %», «todo para Ana»… */
 export function textoReparto(e, g) {
   if (g.paga === 'j') return 'cuenta conjunta';
@@ -509,7 +527,7 @@ export function csv(e) {
       filas.push([t.fecha, 'transferencia', texto, '', num(t.importe), nombreCuenta(e, t.de), ''].map(q).join(';'));
     }
     for (const p of pagosEntreVosotros(e).filter((x) => mesDe(x.fecha) === mes).reverse()) {
-      filas.push([p.fecha, 'pago entre vosotros', nombre(e, p.de) + ' paga a ' + nombre(e, p.de === 'a' ? 'b' : 'a'), '', num(p.importe), '', ''].map(q).join(';'));
+      filas.push([p.fecha, 'pago entre vosotros', nombre(e, p.de) + ' paga a ' + nombre(e, p.de === 'a' ? 'b' : 'a'), '', num(p.importe), '', carpeta(p)].map(q).join(';'));
     }
   }
   return filas.join('\n') + '\n';

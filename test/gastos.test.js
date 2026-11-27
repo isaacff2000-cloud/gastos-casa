@@ -473,6 +473,46 @@ test('deudas: quién pagó, cómo se reparte y pagos para saldar', () => {
   assert.match(N.csv(b.e), /"Súper";"Comida";"100,00";"Pagó Dos";"";"70,00";"30,00"/);
 });
 
+test('deudas por carpeta: cada carpeta lleva sus cuentas y sus pagos aparte', () => {
+  const b = baseLista();
+  const r = b.aplicar([
+    { tipo: 'carpeta.guardar', carpeta: { id: 'roma', nombre: 'Viaje a Roma' } },
+    { tipo: 'carpeta.guardar', carpeta: { id: 'cumple', nombre: 'Cumpleaños' } },
+    // Sin carpeta, como los de antes: pagó Uno y Dos ya se lo devolvió con un pago sin carpeta
+    { tipo: 'gasto.guardar', gasto: { id: 's1', fecha: '2026-01-05', desc: 'Taxi', importe: 1596, paga: 'a', parte: 50, cat: 'salidas', carpeta: null } },
+    { tipo: 'pago.registrar', pago: { id: 'p0', de: 'b', importe: 798, fecha: '2026-01-06' } },
+    // Roma: Dos debe 150 a Uno
+    { tipo: 'gasto.guardar', gasto: { id: 'r1', fecha: '2026-03-30', desc: 'Vuelos', importe: 30000, paga: 'a', parte: 50, cat: 'viajes', carpeta: 'roma' } },
+    // Cumpleaños: Uno debe 20 a Dos
+    { tipo: 'gasto.guardar', gasto: { id: 'k1', fecha: '2026-04-01', desc: 'Tarta', importe: 4000, paga: 'b', parte: 50, cat: 'otros', carpeta: 'cumple' } },
+  ], { por: 'a' });
+  assert.ok(r.every((x) => x.ok), JSON.stringify(r));
+  assert.equal(b.e.pagos.p0.carpeta, null); // un pago sin carpeta salda los gastos sin carpeta
+  assert.equal(N.saldo(b.e, null), 0);
+  assert.equal(N.saldo(b.e, 'roma'), 15000);
+  assert.equal(N.saldo(b.e, 'cumple'), -2000);
+  assert.equal(N.saldo(b.e), 13000); // todo junto, como antes
+  assert.deepEqual(N.saldos(b.e), [{ carpeta: 'cumple', s: -2000 }, { carpeta: 'roma', s: 15000 }]);
+  // Un pago dentro de una carpeta no toca las demás
+  b.aplicar([{ tipo: 'pago.registrar', pago: { id: 'p1', de: 'b', importe: 15000, fecha: '2026-04-05', carpeta: 'roma' } }], { por: 'b' });
+  assert.equal(N.saldo(b.e, 'roma'), 0);
+  assert.equal(N.saldo(b.e, 'cumple'), -2000);
+  assert.deepEqual(N.pagosEntreVosotros(b.e, 'roma').map((p) => p.id), ['p1']);
+  assert.deepEqual(N.pagosEntreVosotros(b.e, null).map((p) => p.id), ['p0']);
+  assert.equal(N.pagosEntreVosotros(b.e).length, 2);
+  // Un gasto nuevo sin carpeta va a su propio apartado, que sale primero
+  b.aplicar([{ tipo: 'gasto.guardar', gasto: { id: 's2', fecha: '2026-04-06', desc: 'Pan', importe: 300, paga: 'b', parte: 50, cat: 'compra' } }], { por: 'b' });
+  assert.deepEqual(N.saldos(b.e), [{ carpeta: null, s: -150 }, { carpeta: 'cumple', s: -2000 }]);
+  // Validaciones: carpeta inexistente y no se borra una carpeta con pagos
+  assert.match(b.aplicar([{ tipo: 'pago.registrar', pago: { id: 'x', de: 'a', importe: 1, fecha: '2026-04-05', carpeta: 'nada' } }], { por: 'a' })[0].error, /carpeta no existe/);
+  b.aplicar([{ tipo: 'carpeta.guardar', carpeta: { id: 'vacia', nombre: 'Vacía' } }, { tipo: 'pago.registrar', pago: { id: 'p2', de: 'a', importe: 1, fecha: '2026-04-05', carpeta: 'vacia' } }], { por: 'a' });
+  assert.match(b.aplicar([{ tipo: 'carpeta.borrar', carpeta: 'vacia' }], { por: 'a' })[0].error, /pagos apuntados/);
+  // Cerrar una carpeta no hace desaparecer lo que se debe en ella
+  b.aplicar([{ tipo: 'carpeta.cerrar', carpeta: 'cumple', cerrada: true }], { por: 'a' });
+  assert.ok(N.saldos(b.e).some((x) => x.carpeta === 'cumple'));
+  assert.match(N.csv(b.e), /"pago entre vosotros";"Dos paga a Uno";"";"150,00";"";"Viaje a Roma"/);
+});
+
 test('servidor: tras actualizar la app, el móvil no se queda con la copia de la versión anterior', async () => {
   const base = new Base(':memory:');
   base.aplicar([{ tipo: 'persona.nombrar', persona: 'a', nombre: 'Uno' }], SIS);
