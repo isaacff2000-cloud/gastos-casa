@@ -231,7 +231,7 @@ async def main():
             comprobar(await uno.locator('.deudas .fila', has_text='Viaje a Roma').filter(has_text='60,00').count() == 1, 'y la carpeta con lo suyo')
             comprobar(await uno.locator('.deudas').get_by_role('button', name='Saldar todo').count() == 1, 'con un botón para saldarlo todo')
             await dos.locator('.deudas .fila', has_text='Viaje a Roma').get_by_role('button', name='Saldar').click()
-            comprobar('60,00' in await dos.locator('.hoja').get_by_label('Importe (€)').input_value(), 'saldar una carpeta propone lo de esa carpeta')
+            comprobar(await dos.locator('.hoja').get_by_label('Importe (€)').input_value() == '60', 'saldar una carpeta propone lo de esa carpeta')
             await dos.locator('.hoja').get_by_role('button', name='Guardar').click()
             comprobar(await esperar(lambda: hay(uno.locator('.deudas', has_text='Viaje a Roma'), 0)), 'saldada la carpeta, desaparece de las deudas')
             comprobar('4,50' in await texto(uno, '.deudas'), 'y lo de fuera de la carpeta sigue pendiente')
